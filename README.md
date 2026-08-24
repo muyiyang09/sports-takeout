@@ -40,7 +40,14 @@
 
 ## 🖼 界面截图
 
-> 待补充：项目运行后截取三端真实界面。欢迎补充 PR。
+### 用户端 · 课程浏览
+![用户端首页](docs/screenshots/user-home.png)
+
+### 教练端 · 工作台
+![教练端工作台](docs/screenshots/coach-home.png)
+
+### 管理端 · 教练审核
+![管理端教练审核](docs/screenshots/admin-coach.png)
 
 ---
 
@@ -219,6 +226,47 @@ docker-compose up -d
 
 ---
 
+## ✅ 端到端验证
+
+以下 10 个接口已全部验证通过（2026-08-24）：
+
+| # | 接口 | 说明 | 状态 |
+|---|---|---|---|
+| 1 | `POST /admin/employee/login` | 管理端登录 | ✅ |
+| 2 | `GET /admin/coach/page` | 教练分页查询 | ✅ |
+| 3 | `POST /user/user/mockLogin` | 用户端模拟登录 | ✅ |
+| 4 | `GET /user/category/list?type=1` | 课程分类列表 | ✅ |
+| 5 | `GET /user/course/list?categoryId=1` | 课程列表 | ✅ |
+| 6 | `GET /user/coach/list` | 教练列表 | ✅ |
+| 7 | `POST /coach/coach/login` | 教练端登录 | ✅ |
+| 8 | `GET /coach/order/dispatchPool` | 教练查派单池 | ✅ |
+| 9 | `GET /admin/dispatchPool/list` | 管理端派单池监控 | ✅ |
+| 10 | `GET /admin/order/statistics` | 订单统计 | ✅ |
+
+---
+
+## 💳 支付模式说明
+
+| 模式 | 说明 |
+|---|---|
+| **当前（模拟支付）** | `POST /user/order/payment` 接口直接调用 `paySuccess()` 跳过微信支付，适合开发演示和本地测试 |
+| **真实微信支付** | 需自行申请微信支付商户号，在 `application.yml` 配置 `appid/mchid/apiV3Key/证书路径`，并替换 `OrderServiceImpl.payment()` 中的模拟调用为 `WeChatPayUtil.pay()` |
+
+> 代码已集成微信支付 SDK（`WeChatPayUtil`），切换到真实支付只需配置商户号 + 打开注释，无需重写。
+
+---
+
+## 🏷 品牌定制说明
+
+| 定制项 | 位置 | 说明 |
+|---|---|---|
+| 平台名称 | 小程序 `pages/index` 标题 + 管理端 `App.vue` 侧边栏 | 搜索「体育外卖」替换即可 |
+| Logo | 小程序 `static/` + 管理端 `public/` | 替换图片文件 |
+| 主题色 | 管理端 `src/styles/` + 小程序 `uni.scss` | 修改 Element Plus / uni-app 主题变量 |
+| 课程分类 | 数据库 `category` 表 | 种子数据可自由增删 |
+
+---
+
 ## 📝 项目文档
 
 - **[PRD.md](PRD.md)** — 产品需求文档：背景、领域模型映射、订单状态机、MVP 做/不做边界
@@ -234,6 +282,14 @@ docker-compose up -d
 
 ---
 
-## 📄 开源协议
+## 📄 开源协议与商业授权
 
 本项目采用 **AGPL-3.0** 协议发布，详见 [LICENSE](LICENSE)。
+
+| 用途 | 是否免费 | 说明 |
+|---|---|---|
+| 个人学习 / 研究 | 免费 | 保留版权声明即可 |
+| 商业使用（上线运营 / 二次开发后部署） | **需购买商业授权** | AGPL 要求公开源码，购买商业授权可免除该义务 |
+| 二次开发后闭源销售 | **需购买商业授权** | 同上 |
+
+> 商业授权联系方式：请在 GitHub Issues 留言或联系项目维护者。
