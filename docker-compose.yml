@@ -1,0 +1,81 @@
+version: '3.8'
+
+# 体育外卖 · 上门私教平台 — 一键部署
+# 使用方法：
+#   1. 复制 .env.example 为 .env 并填写配置
+#   2. docker-compose up -d
+#   3. 访问 http://localhost:8080
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: sports-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: sports_takeout
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql/sports_take_out.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: sports-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./sky-take-out
+      dockerfile: Dockerfile
+    container_name: sports-backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SKY_DATASOURCE_HOST: mysql
+      SKY_DATASOURCE_PORT: 3306
+      SKY_DATASOURCE_DATABASE: sports_takeout
+      SKY_DATASOURCE_USERNAME: root
+      SKY_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      SKY_REDIS_HOST: redis
+      SKY_REDIS_PORT: 6379
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  admin-web:
+    build:
+      context: ./admin-web
+      dockerfile: Dockerfile
+    container_name: sports-admin-web
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:

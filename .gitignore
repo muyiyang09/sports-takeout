@@ -1,0 +1,35 @@
+# ===== 依赖 / 构建产物 =====
+node_modules/
+dist/
+unpackage/
+target/
+build/
+out/
+*.class
+*.log
+logs/
+
+# ===== IDE =====
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# ===== 系统 =====
+.DS_Store
+Thumbs.db
+
+# ===== 本机密钥（真实密钥一律不要提交） =====
+.env
+.env.local
+application-local.yml
+application-local.yaml
+*.pem
+apiclient_key.pem
+
+# ===== Claude / 本地工具配置 =====
+.claude/
+.agents/
+skills-lock.json

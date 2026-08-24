@@ -1,0 +1,106 @@
+{
+    "pages": [
+        {
+            "path": "pages/index/index",
+            "style": {
+                "navigationBarTitleText": "教练工作台",
+                "navigationBarBackgroundColor": "#2F80ED",
+                "navigationBarTextStyle": "white"
+            }
+        },
+        {
+            "path": "pages/order/order",
+            "style": {
+                "navigationBarTitleText": "我的订单",
+                "navigationBarBackgroundColor": "#2F80ED",
+                "navigationBarTextStyle": "white"
+            }
+        },
+        {
+            "path": "pages/pool/pool",
+            "style": {
+                "navigationBarTitleText": "派单池",
+                "navigationBarBackgroundColor": "#2F80ED",
+                "navigationBarTextStyle": "white"
+            }
+        },
+        {
+            "path": "pages/my/my",
+            "style": {
+                "navigationBarTitleText": "我的",
+                "navigationBarBackgroundColor": "#2F80ED",
+                "navigationBarTextStyle": "white"
+            }
+        },
+        {
+            "path": "pages/login/login",
+            "style": {
+                "navigationBarTitleText": "教练登录",
+                "navigationBarBackgroundColor": "#2F80ED",
+                "navigationBarTextStyle": "white"
+            }
+        },
+        {
+            "path": "pages/register/register",
+            "style": {
+                "navigationBarTitleText": "教练入驻",
+                "navigationBarBackgroundColor": "#2F80ED",
+                "navigationBarTextStyle": "white"
+            }
+        },
+        {
+            "path": "pages/order/detail",
+            "style": {
+                "navigationBarTitleText": "订单详情",
+                "navigationBarBackgroundColor": "#2F80ED",
+                "navigationBarTextStyle": "white"
+            }
+        },
+        {
+            "path": "pages/schedule/schedule",
+            "style": {
+                "navigationBarTitleText": "我的排期",
+                "navigationBarBackgroundColor": "#2F80ED",
+                "navigationBarTextStyle": "white"
+            }
+        }
+    ],
+    "tabBar": {
+        "color": "#9CA3AF",
+        "selectedColor": "#2F80ED",
+        "backgroundColor": "#ffffff",
+        "borderStyle": "white",
+        "list": [
+            {
+                "pagePath": "pages/index/index",
+                "text": "工作台",
+                "iconPath": "static/tabbar/tab_home.png",
+                "selectedIconPath": "static/tabbar/tab_home_active.png"
+            },
+            {
+                "pagePath": "pages/order/order",
+                "text": "订单",
+                "iconPath": "static/tabbar/tab_order.png",
+                "selectedIconPath": "static/tabbar/tab_order_active.png"
+            },
+            {
+                "pagePath": "pages/pool/pool",
+                "text": "派单池",
+                "iconPath": "static/tabbar/tab_pool.png",
+                "selectedIconPath": "static/tabbar/tab_pool_active.png"
+            },
+            {
+                "pagePath": "pages/my/my",
+                "text": "我的",
+                "iconPath": "static/tabbar/tab_my.png",
+                "selectedIconPath": "static/tabbar/tab_my_active.png"
+            }
+        ]
+    },
+    "globalStyle": {
+        "navigationBarTextStyle": "white",
+        "navigationBarTitleText": "体育外卖教练端",
+        "navigationBarBackgroundColor": "#2F80ED",
+        "backgroundColor": "#F5F6F7"
+    }
+}
