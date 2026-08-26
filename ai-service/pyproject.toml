@@ -1,0 +1,35 @@
+[project]
+name = "sports-takeout-ai"
+version = "0.1.0"
+description = "体育外卖 · AI 微服务：教练智能推荐 / 评价摘要 / 证书审核（LangGraph + LiteLLM + Pydantic）"
+requires-python = ">=3.11"
+dependencies = [
+    # —— 核心框架：版本严格锁定，避免漂移（参考经验 1674242 / 100007543）——
+    # 注：add_messages reducer 与 BaseMessage 已整合进 langchain-core，无需额外 langchain-messages
+    "langgraph==1.1.4",          # LangGraph 1.x GA，StateGraph + add_messages 语义稳定
+    "langchain-core>=1.0",       # 只用到消息对象与 add_messages reducer；须 >=1.0 对齐 langgraph-prebuilt
+    # —— LLM：通过 LiteLLM 统一路由 DeepSeek / 通义 / OpenAI（参考经验 100007545）——
+    "litellm==1.55.3",           # 多模型统一接口（OpenAI 兼容模式）
+    # —— 结构化输出 + 适配层（参考经验 100036121：LLM 漂移前做归一化）——
+    "pydantic==2.10.4",
+    "pydantic-settings==2.6.1",
+    # —— 服务层 ——
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.32.1",
+    "httpx==0.27.2",             # HTTP 调现有 Spring Boot（如果需要远程查教练库）
+    # —— 数据库：只读现有 sports_takeout MySQL ——
+    "sqlalchemy==2.0.36",
+    "pymysql==1.1.1",
+    # —— 工具 ——
+    "python-dotenv==1.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.3",
+    "rich==13.9.4",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
