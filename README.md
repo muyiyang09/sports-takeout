@@ -1,44 +1,333 @@
-# 体育外卖 · 上门私教平台
+<div align="center">
 
-> 基于 **Spring Boot 2.7 + uni-app** 的上门私教 O2O 平台。完整实现「浏览课程 → 选教练 → 约时段 → 支付 → 接单 → 上门服务 → 评价 → 结算」全流程闭环，支持**双派单模型**（指定教练 + 抢单池）。
+# 体育外卖 · AI 智能体平台
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.3-brightgreen)
-![MyBatis](https://img.shields.io/badge/MyBatis-2.3.1-orange)
-![Vue](https://img.shields.io/badge/Vue-3.x-green)
-![uni-app](https://img.shields.io/badge/uni--app-2.x-2B9939)
-![MySQL](https://img.shields.io/badge/MySQL-8.0-blue)
-![Redis](https://img.shields.io/badge/Redis-7-red)
+**基于 Spring Boot + LangGraph 的上门私教 O2O 智能服务系统**
 
----
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-1.1.4-0f0f0f?logo=langchain)](https://langchain-ai.github.io/langgraph/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.3-brightgreen.svg)](https://spring.io/)
+[![Vue](https://img.shields.io/badge/Vue-3.x-green.svg)](https://vuejs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688)](https://fastapi.tiangolo.com/)
+[![Non-Commercial](https://img.shields.io/badge/Non--Commercial-License-red.svg)](#许可证-license)
 
-## 📖 项目简介
-
-「体育外卖」虽带"外卖"二字，业务本质是**上门服务 O2O**：教练携带便携器械（弹力带、壶铃、瑜伽垫、体脂秤等）上门，为客户提供一对一的科学减脂/增肌/拉伸/产后恢复服务。行业造词称之为「体育外卖」。
-
-**一句话价值：把健身房搬到家里** —— 用户下单约教练，教练带器械上门做科学减脂运动。
-
-系统由三端组成：
-
-| 角色 | 端 | 形态 |
-|---|---|---|
-| 用户（减脂客户） | 用户端 | 微信小程序（uni-app） |
-| 教练 | 教练端 | 微信小程序（uni-app） |
-| 平台运营 | 管理端 | PC Web（Vue 3 + Element Plus） |
+[中文](#项目介绍) | [English](#english)
 
 ---
 
-## 🎯 核心亮点
+</div>
 
-- **双派单状态机**：同一订单走「指定教练」或「抢单池」两条链路，用策略模式区分，完整覆盖 1 待付款 → 2 待接单 → 3 待服务 → 4 服务中 → 5 已完成，以及 6 已取消 / 7 拒单。
-- **并发控制**：排期**乐观锁**防同排期被多人预约；抢单用 **Redis SETNX 分布式锁 + 乐观锁 CAS** 防同一订单被多教练同时抢。
-- **三端 JWT 鉴权隔离**：管理端 / 用户端 / 教练端各自独立密钥 + 独立拦截器。
-- **定时任务兜底**：派单池超时未派自动取消（Spring Task）。
-- **WebSocket 来单提醒**：新订单实时推送教练端。
+## 项目介绍
 
----
+**体育外卖**（Sports Takeout）是一个面向上门私教 O2O 场景的智能服务平台，核心定位是"**把健身房搬到家里**"——教练携带便携器械上门，为用户提供科学的减脂、增肌、拉伸、产后恢复等一对一训练服务。
 
-## 🖼 界面截图
+本项目在传统 O2O 业务系统之上，构建了一套独立的 **AI 微服务**（`ai-service`），基于 LangGraph Agent 框架，实现教练智能推荐、课程评价摘要、教练资质智能审核等 AI 能力，打造"业务系统 + AI 智能体"的双引擎架构。
+
+## 核心亮点
+
+- **🤖 多 Agent 架构**：教练推荐 Agent + 评价摘要 Agent + 证书审核 Agent + Supervisor 调度
+- **🔍 混合检索 RAG**：BM25 稀疏检索 + 向量召回 + RRF 融合，支持 Chroma/pgvector 双后端切换
+- **🔄 Loop 工程**：条件分支路由、失败重试循环、HITL 人工介入、自我反思
+- **🛡️ 工程化加固**：分布式锁防死锁、Checkpointer 状态持久化、限流熔断、Token 预算管控
+- **🔌 MCP 工具层**：跨语言工具复用，Spring Boot 业务接口暴露为 MCP Tool 供 AI 调用
+- **📊 可观测性**：审计日志、Metrics 指标、Trace 链路追踪、Prompt 版本管理
+- **🏗️ 双派单模型**：指定教练 + 抢单池两种派单模式，完整状态机覆盖全流程
+
+## 系统架构
+
+```mermaid
+flowchart TB
+    subgraph 前端
+        U[用户端微信小程序]
+        C[教练端微信小程序]
+        A[管理端 Web]
+    end
+
+    subgraph 后端
+        direction TB
+        SB[Spring Boot 主后端]
+        AI[AI 微服务 · FastAPI + LangGraph]
+    end
+
+    subgraph 存储
+        MySQL[(MySQL 8.0)]
+        Redis[(Redis 7)]
+        Vector[(Chroma / pgvector)]
+    end
+
+    subgraph AI Agents
+        direction LR
+        A1[教练推荐 Agent]
+        A2[评价摘要 Agent]
+        A3[证书审核 Agent]
+        A4[Supervisor 调度]
+    end
+
+    subgraph RAG 层
+        BM25[BM25 稀疏检索]
+        EMB[向量 Embedding]
+        RRF[RRF 融合]
+    end
+
+    U --> SB
+    C --> SB
+    A --> SB
+    SB --> MySQL
+    SB --> Redis
+    SB -->|AI 调用| AI
+
+    AI --> A4
+    A4 --> A1
+    A4 --> A2
+    A4 --> A3
+
+    A1 --> RAG 层
+    RAG 层 --> Vector
+    A1 --> MySQL
+    A2 --> MySQL
+    A3 --> MySQL
+
+    AI --> Redis
+    AI -->|只读| MySQL
+```
+
+## AI 微服务详解
+
+### 教练推荐 Agent（recommend_coach）
+
+三节点串行 DAG 流程：
+
+1. **Node 1 · 意图抽取**（LLM）：用户自然语言 → 结构化意图（城市、项目、预算、时段等）
+2. **Node 2 · 检索排序**（纯规则）：MySQL 查询 + 五维加权打分（评分/语义/等级/距离/档期）
+3. **Node 3 · 理由生成**（LLM）：候选结果 → 2-3 句个性化推荐理由
+
+### 评价摘要 Agent（review_summary）
+
+批量分析历史用户评价，自动打标签并生成摘要。
+
+### 证书审核 Agent（cert_review）
+
+OCR + 数据库比对 + HITL 人工确认的教练资质审核流程。
+
+### Supervisor 调度
+
+统一入口，根据用户意图路由到对应子 Agent，支持降级策略。
+
+## 快速开始
+
+### 前置要求
+
+- Docker & Docker Compose
+- Python 3.11+
+- JDK 8+
+- Node.js 18+
+
+### 一键部署（推荐）
+
+```bash
+git clone <仓库地址>
+cd sports-takeout
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 填写 API Key 和密码
+
+# 一键启动所有服务（含 AI 微服务）
+docker-compose up -d
+```
+
+启动后访问：
+
+| 服务 | 地址 |
+|------|------|
+| 管理端前端 | http://localhost:5173 |
+| Spring Boot API | http://localhost:8080 |
+| AI 微服务 | http://localhost:18000 |
+| AI 接口文档 | http://localhost:18000/docs |
+
+### AI 微服务本地开发
+
+```bash
+cd ai-service
+
+# 安装依赖（推荐使用 uv 或 pip）
+pip install -e ".[dev]"
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 填写 LLM API Key、MySQL/Redis 连接等
+
+# 启动服务
+python -m app.main
+
+# 运行测试
+pytest tests/ -v
+```
+
+### API 接口
+
+| Method | Path | 说明 |
+|--------|------|------|
+| GET | `/healthz` | 健康检查 |
+| GET | `/readyz` | 就绪探针（含依赖检查） |
+| POST | `/ai/recommend-coach` | 教练智能推荐 |
+| POST | `/ai/review-summary` | 评价摘要生成 |
+| POST | `/ai/cert-review` | 证书智能审核 |
+
+**推荐请求示例：**
+```json
+POST /ai/recommend-coach
+{
+  "user_query": "望京，预算200以内，想产后恢复，周末上午",
+  "city_code_override": null,
+  "top_n": 3
+}
+```
+
+**推荐响应示例：**
+```json
+{
+  "intent": {
+    "city": "北京",
+    "district": "望京",
+    "specialization": "产后恢复",
+    "tags": ["周末", "上午"],
+    "price_max": 200
+  },
+  "candidates": [
+    {"coach_id": 1, "total_score": 0.89, "dimensions": {"rating": 0.4, "semantic": 0.32, "level": 0.09, "distance": 0.06, "slot": 0.02}}
+  ],
+  "recommend_reason": "针对您的产后恢复需求，推荐张教练...",
+  "matched_course_name": "上门产后恢复私教课",
+  "matched_course_price": 199.0,
+  "over_budget": false
+}
+```
+
+## 项目结构
+
+```
+sports-takeout/
+├── README.md                      # 项目说明（中英双版）
+├── LICENSE                        # 非商业使用许可
+├── PRD.md                         # 产品需求文档
+├── DEPLOY.md                      # 部署指南
+├── docker-compose.yml             # Docker 一键部署编排
+├── .env.example                   # 环境变量模板
+│
+├── ai-service/                    # AI 微服务（核心）
+│   ├── app/
+│   │   ├── clients/               # 外部客户端（LLM/DB/Redis/向量/Embedding/Reranker）
+│   │   ├── core/                  # 核心能力（Checkpoint/Session/安全/审计/指标）
+│   │   ├── eval/                  # 评估框架（Judge/Metric/Runner）
+│   │   ├── graphs/                # Agent 图谱（Supervisor/Recommend/Review/Cert）
+│   │   ├── mcp/                   # MCP 工具层（Server/Client）
+│   │   ├── middleware/            # 中间件（限流/Token预算/RequestID）
+│   │   ├── prompts/               # Prompt 模板（YAML 配置）
+│   │   ├── schemas/               # 数据模型（Pydantic Schema）
+│   │   ├── tools/                 # 工具注册（CoachTools/ReviewTools）
+│   │   ├── config.py              # 强类型配置中心
+│   │   └── main.py                # FastAPI 入口
+│   ├── docs/                      # AI 工程文档（12 份）
+│   ├── tests/                     # 单元测试
+│   └── pyproject.toml             # Python 项目配置
+│
+├── sky-take-out/                  # Spring Boot 主后端
+│   ├── sky-common/                # 公共模块（常量/异常/工具）
+│   ├── sky-pojo/                  # 实体/DTO/VO
+│   └── sky-server/                # Spring Boot 主工程
+│
+├── admin-web/                     # 管理端 Web（Vue 3 + Element Plus）
+│
+└── docs/                          # 截图等资源
+```
+
+## 技术栈
+
+### 后端（Spring Boot）
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Spring Boot | 2.7.3 | 主后端框架 |
+| MyBatis | 2.3.1 | ORM |
+| MySQL | 8.0 | 业务数据库 |
+| Redis | 7 | 缓存/分布式锁 |
+| JWT | - | 三端鉴权隔离 |
+| WebSocket | - | 实时消息推送 |
+
+### AI 微服务
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Python | 3.11+ | 开发语言 |
+| LangGraph | 1.1.4 | Agent 编排框架 |
+| langchain-core | ≥1.0 | 消息核心 |
+| LiteLLM | 1.55.3 | LLM 多供应商路由 |
+| Pydantic | 2.10.4 | 强类型数据校验 |
+| FastAPI | 0.115.6 | HTTP 服务框架 |
+| uvicorn | 0.32.1 | ASGI 服务器 |
+| SQLAlchemy | 2.0.36 | 数据库访问 |
+| Redis (python) | 7.4.1 | 缓存/Checkpointer |
+| langgraph-checkpoint-redis | 0.5.2 | 生产级状态持久化 |
+| rank-bm25 | 0.2.2 | 稀疏检索 |
+| Chroma / pgvector | - | 向量存储 |
+
+### 前端
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| uni-app | 2.x | 微信小程序（用户端/教练端） |
+| Vue 3 + Element Plus | 3.x | 管理端 PC Web |
+
+## 配置说明
+
+### AI 微服务核心配置
+
+```env
+# ===== LLM 配置 =====
+LLM_MODEL=deepseek/deepseek-chat
+LLM_API_KEY=your-api-key
+LLM_BASE_URL=
+
+# ===== 数据库（只读现有库） =====
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=your-password
+MYSQL_DATABASE=sports_takeout
+
+# ===== Redis（缓存 + Checkpointer） =====
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DB=1
+
+# ===== 向量库后端选择 =====
+# chroma（开发）/ chroma_http（过渡）/ pgvector（生产首选）
+VECTOR_DB_BACKEND=chroma
+
+# ===== 功能开关 =====
+HYBRID_RETRIEVAL_ENABLED=true
+RERANKER_ENABLED=false
+CHECKPOINTER_BACKEND=memory   # memory(开发) / redis(生产)
+REVIEW_SUMMARY_ENABLED=true
+CERT_REVIEW_ENABLED=true
+```
+
+详细配置项见 [ai-service/.env.example](ai-service/.env.example)。
+
+## 三端功能
+
+### 用户端（微信小程序）
+课程浏览/分类/详情 · 教练列表 · 两种下单（指定/派单）· 时段预约 · 订单跟踪 · 双维评价 · 地址管理 · 微信登录
+
+### 教练端（微信小程序）
+入驻注册 · 资质上传 · 排期管理 · 接单/抢单 · 订单导航 · 服务上报 · 训练记录 · 评价查看
+
+### 管理端（PC Web）
+教练审核 · 课程管理 · 订单管理 · 派单池监控 · AI 审计日志查看
+
+
+## 界面截图
 
 ### 用户端 · 课程浏览
 ![用户端首页](docs/screenshots/user-home.png)
@@ -49,60 +338,7 @@
 ### 管理端 · 教练审核
 ![管理端教练审核](docs/screenshots/admin-coach.png)
 
----
-
-## 🧭 三端功能
-
-### 用户端（微信小程序 · 10 页）
-浏览课程/分类/详情 · 教练列表（按评分/等级筛选）· 两种下单（指定教练 / 就近派单）· 时段预约 · 模拟支付 · 订单状态跟踪 · 双维度评价（教练 + 课程）· 地址管理 · 微信登录
-
-### 教练端（微信小程序 · 8 页）
-入驻注册 + 资质上传 · 个人资料 / 排期 / 服务半径 · 接单（指定单确认 / 抢单池抢单）· 订单导航（地址 + 电话）· 开始/完成服务 · 训练记录 + 体测数据上传 · 查看评价
-
-### 管理端（PC Web · 5 页）
-教练审核（资质证书预览）· 课程管理（CRUD + 上下架）· 订单管理（搜索 + 详情）· 派单池监控 · 登录
-
----
-
-## 🏗 系统架构
-
-```mermaid
-flowchart LR
-    subgraph 前端
-        U[用户端小程序<br/>uni-app] 
-        C[教练端小程序<br/>uni-app]
-        A[管理端 PC<br/>Vue3 + Element Plus]
-    end
-
-    subgraph 后端[后端 · Spring Boot 2.7]
-        API[Controller 层<br/>admin / user / coach]
-        SVC[Service 层<br/>双派单策略 · 状态机]
-        MPR[Mapper 层<br/>MyBatis]
-        JWT[JWT 鉴权拦截器 · 三端隔离]
-        TASK[Spring Task 定时任务]
-        WS[WebSocket 来单提醒]
-    end
-
-    subgraph 中间件
-        DB[(MySQL 8.0<br/>sports_takeout)]
-        RD[(Redis 7<br/>分布式锁 / 缓存)]
-        OSS[阿里云 OSS<br/>文件存储]
-    end
-
-    U --> API
-    C --> API
-    A --> API
-    API --> JWT
-    API --> SVC --> MPR --> DB
-    SVC --> RD
-    SVC --> OSS
-    TASK --> SVC
-    WS --> C
-```
-
----
-
-## 🔄 订单状态机
+## 订单状态机
 
 ```mermaid
 stateDiagram-v2
@@ -119,27 +355,7 @@ stateDiagram-v2
 
 > 状态码：`1` 待付款 / `2` 待接单 / `3` 待服务 / `4` 服务中 / `5` 已完成 / `6` 已取消 / `7` 拒单
 
----
-
-## 🛠 技术栈
-
-| 层 | 技术 |
-|---|---|
-| 后端框架 | Spring Boot 2.7.3 + MyBatis |
-| 数据库 | MySQL 8.0 |
-| 缓存 / 分布式锁 | Redis 7（Spring Data Redis） |
-| 鉴权 | JWT（三端独立密钥 + 拦截器） |
-| 定时任务 | Spring Task（派单池超时兜底） |
-| 实时通信 | WebSocket（来单提醒） |
-| 文件存储 | 阿里云 OSS |
-| 支付 | 微信支付 SDK（MVP 为模拟支付） |
-| 接口文档 | Knife4j (Swagger) |
-| 管理端前端 | Vue 3 + Element Plus + Vite |
-| 移动端 | uni-app（Vue 2，编译到微信小程序） |
-
----
-
-## 🗄 数据库设计（14 张表）
+## 数据库设计（14 张表）
 
 | 表 | 说明 | 表 | 说明 |
 |---|---|---|---|
@@ -153,85 +369,45 @@ stateDiagram-v2
 
 完整建表脚本：`sql/sports_take_out.sql`（含种子数据）。
 
----
+## 支付模式说明
 
-## 📁 目录结构
+| 模式 | 说明 |
+|------|------|
+| **当前（模拟支付）** | `POST /user/order/payment` 接口直接调用 `paySuccess()` 跳过微信支付，适合开发演示和本地测试 |
+| **真实微信支付** | 需自行申请微信支付商户号，在 `application.yml` 配置 `appid/mchid/apiV3Key/证书路径`，并替换 `OrderServiceImpl.payment()` 中的模拟调用为 `WeChatPayUtil.pay()` |
 
-```
-sports-takeout/
-├── README.md                   # 本文档
-├── PRD.md                      # 产品需求文档（MVP 边界）
-├── DEPLOY.md                   # 部署指南（Docker / 本地）
-├── LICENSE                     # AGPL-3.0
-├── docker-compose.yml          # 一键部署编排
-├── .env.example                # 环境变量模板
-├── sql/
-│   └── sports_take_out.sql     # 建库 + 建表 + 种子数据（14 张表）
-├── sky-take-out/               # 后端工程（Maven 多模块）
-│   ├── Dockerfile
-│   ├── sky-common/             # 公共模块（工具类 / 常量 / 异常）
-│   ├── sky-pojo/               # 实体 / DTO / VO
-│   └── sky-server/             # Spring Boot 主工程
-│       └── src/main/java/com/sky/
-│           ├── controller/     # admin / user / coach 三组 API
-│           ├── service/impl/   # 业务逻辑（双派单策略 / 状态机）
-│           ├── interceptor/    # JWT 拦截器（三端）
-│           └── task/           # 定时任务
-├── admin-web/                  # 管理端 PC 前端（Vue3 + Element Plus）
-├── uniapp-user/                # 用户端小程序（uni-app）
-└── uniapp-coach/               # 教练端小程序（uni-app）
-```
+> 代码已集成微信支付 SDK（`WeChatPayUtil`），切换到真实支付只需配置商户号 + 打开注释，无需重写。
 
----
+## 品牌定制说明
 
-## 🚀 快速开始
+| 定制项 | 位置 | 说明 |
+|---|---|---|
+| 平台名称 | 小程序 `pages/index` 标题 + 管理端 `App.vue` 侧边栏 | 搜索「体育外卖」替换即可 |
+| Logo | 小程序 `static/` + 管理端 `public/` | 替换图片文件 |
+| 主题色 | 管理端 `src/styles/` + 小程序 `uni.scss` | 修改 Element Plus / uni-app 主题变量 |
+| 课程分类 | 数据库 `category` 表 | 种子数据可自由增删 |
 
-### Docker 一键部署（推荐）
+## 致谢与声明
 
-```bash
-git clone <仓库地址>
-cd sports-takeout
-cp .env.example .env        # 按需修改
-docker-compose up -d
-```
+本项目基于「**苍穹外卖**」（sky-take-out，黑马程序员教学项目）技术骨架二次开发，将餐饮外卖领域模型重构为「上门私教」业务领域，感谢原项目提供的脚手架基础。
 
-启动后访问：
+> ⚠️ 本项目为学习交流与作品展示用途。AI 微服务模块为自主研发，业务底座部分基于第三方教学项目重构。
+## 演示账号
 
-| 服务 | 地址 |
-|---|---|
-| 管理端前端 | http://localhost:5173 |
-| 接口文档 | http://localhost:8080/doc.html |
+| 角色 | 账号 | 密码 |
+|------|------|------|
+| 管理员（管理端） | admin | 123456 |
+| 教练（已审核） | 13900000001 | 123456 |
+| 教练（待审核） | 13900000003 | 123456 |
+| 用户（开发环境） | mock 登录 | POST /user/user/mockLogin |
 
-### 本地开发
 
-1. 导入数据库：`mysql -u root -p < sql/sports_take_out.sql`
-2. 启动后端（在 `sky-take-out/` 下）：`mvn spring-boot:run`（多模块工程，需在 `sky-server` 模块目录下执行）
-3. 启动管理端：`cd admin-web && npm install && npm run dev`
-4. 小程序用 HBuilderX 导入 `uniapp-user` / `uniapp-coach`，改 `api/request.js` 的 `BASE_URL`
-
-> 详细步骤与常见问题见 **[DEPLOY.md](DEPLOY.md)**。
-
----
-
-## 👤 演示账号
-
-| 角色 | 端 | 账号 | 密码 |
-|---|---|---|---|
-| 管理员 | 管理端 http://localhost:5173 | `admin` | `123456` |
-| 教练（已审核） | 教练端小程序 | `13900000001`（李教练） | `123456` |
-| 教练（待审核） | — | `13900000003`（张教练） | `123456` |
-| 用户 | 用户端小程序 | 开发环境 mock 登录 | `POST /user/user/mockLogin` |
-
-> 教练端登录接口：`POST /coach/login`；管理端：`POST /admin/employee/login`。MVP 阶段支付为**模拟支付**，微信登录需自备 appid/secret。
-
----
-
-## ✅ 端到端验证
+## 端到端验证
 
 以下 10 个接口已全部验证通过（2026-08-24）：
 
 | # | 接口 | 说明 | 状态 |
-|---|---|---|---|
+|---|------|------|------|
 | 1 | `POST /admin/employee/login` | 管理端登录 | ✅ |
 | 2 | `GET /admin/coach/page` | 教练分页查询 | ✅ |
 | 3 | `POST /user/user/mockLogin` | 用户端模拟登录 | ✅ |
@@ -243,53 +419,490 @@ docker-compose up -d
 | 9 | `GET /admin/dispatchPool/list` | 管理端派单池监控 | ✅ |
 | 10 | `GET /admin/order/statistics` | 订单统计 | ✅ |
 
----
+## 项目文档
 
-## 💳 支付模式说明
 
-| 模式 | 说明 |
-|---|---|
-| **当前（模拟支付）** | `POST /user/order/payment` 接口直接调用 `paySuccess()` 跳过微信支付，适合开发演示和本地测试 |
-| **真实微信支付** | 需自行申请微信支付商户号，在 `application.yml` 配置 `appid/mchid/apiV3Key/证书路径`，并替换 `OrderServiceImpl.payment()` 中的模拟调用为 `WeChatPayUtil.pay()` |
+| 文档 | 说明 |
+|------|------|
+| [PRD.md](PRD.md) | 产品需求文档：业务背景、领域模型、MVP 边界 |
+| [DEPLOY.md](DEPLOY.md) | 部署指南：Docker / 本地开发 / 常见问题 |
+| [ai-service/docs/01-项目概览与路线图.md](ai-service/docs/01-项目概览与路线图.md) | AI 服务现状、商业化差距、执行路线图 |
+| [ai-service/docs/02-Agent工程能力地图.md](ai-service/docs/02-Agent工程能力地图.md) | Agent 工程能力全景 |
+| [ai-service/docs/03-循环工程.md](ai-service/docs/03-循环工程.md) | 条件分支、重试、HITL、refine 循环 |
+| [ai-service/docs/04-RAG混合检索.md](ai-service/docs/04-RAG混合检索.md) | BM25 + 向量 + Reranker 混合检索 |
+| [ai-service/docs/05-商业化加固.md](ai-service/docs/05-商业化加固.md) | 并发/高可用/工程化加固 |
+| [ai-service/docs/06-Harness工程与评估.md](ai-service/docs/06-Harness工程与评估.md) | Eval 数据集、Metric、Trace |
+| [ai-service/docs/07-MCP工具层.md](ai-service/docs/07-MCP工具层.md) | MCP Server/Client、跨语言工具复用 |
+| [ai-service/docs/08-多Agent实现.md](ai-service/docs/08-多Agent实现.md) | 多 Agent 协同、Supervisor 调度 |
+| [ai-service/docs/09-Agent面试题集.md](ai-service/docs/09-Agent面试题集.md) | Agent 技术面试深度题集 |
+| [ai-service/docs/10-上线检查清单.md](ai-service/docs/10-上线检查清单.md) | 7 阶段上线检查清单 |
 
-> 代码已集成微信支付 SDK（`WeChatPayUtil`），切换到真实支付只需配置商户号 + 打开注释，无需重写。
+## 许可证 (License)
 
----
+[![Non-Commercial](https://img.shields.io/badge/Non--Commercial-License-red.svg)](LICENSE)
 
-## 🏷 品牌定制说明
+本项目采用 **AGPL-3.0 + 非商业附加条款** 双重许可。**严禁任何形式的商业用途**。
 
-| 定制项 | 位置 | 说明 |
-|---|---|---|
-| 平台名称 | 小程序 `pages/index` 标题 + 管理端 `App.vue` 侧边栏 | 搜索「体育外卖」替换即可 |
-| Logo | 小程序 `static/` + 管理端 `public/` | 替换图片文件 |
-| 主题色 | 管理端 `src/styles/` + 小程序 `uni.scss` | 修改 Element Plus / uni-app 主题变量 |
-| 课程分类 | 数据库 `category` 表 | 种子数据可自由增删 |
+| 允许 | 禁止 |
+|------|------|
+| ✅ 个人学习与研究 | ❌ 商业部署与生产使用 |
+| ✅ 教育用途（教学/课程） | ❌ 集成到商业 SaaS 或付费服务 |
+| ✅ 内部评估与测试 | ❌ 用于提供付费 AI 代理服务 |
+| ✅ 开源社区贡献 | ❌ 转售、再许可或分发 |
 
----
-
-## 📝 项目文档
-
-- **[PRD.md](PRD.md)** — 产品需求文档：背景、领域模型映射、订单状态机、MVP 做/不做边界
-- **[DEPLOY.md](DEPLOY.md)** — 部署指南：Docker 一键部署 / 本地开发 / 常见问题
-
----
-
-## 🙏 致谢与声明
-
-本项目基于「**苍穹外卖**（sky-take-out，黑马程序员教学项目）」技术骨架二次开发，将餐饮外卖领域模型重构为「上门私教」业务领域，感谢原项目提供的脚手架基础。
-
-> ⚠️ 本项目为学习交流与作品展示用途。因底座涉及第三方教学项目代码，若计划商用，请自行评估版权合规性。
+**详细条款见 [LICENSE](LICENSE) 文件。** 如有合作或特殊授权需求，请联系项目维护者。
 
 ---
 
-## 📄 开源协议与商业授权
+<a id="english"></a>
 
-本项目采用 **AGPL-3.0** 协议发布，详见 [LICENSE](LICENSE)。
+## English
 
-| 用途 | 是否免费 | 说明 |
-|---|---|---|
-| 个人学习 / 研究 | 免费 | 保留版权声明即可 |
-| 商业使用（上线运营 / 二次开发后部署） | **需购买商业授权** | AGPL 要求公开源码，购买商业授权可免除该义务 |
-| 二次开发后闭源销售 | **需购买商业授权** | 同上 |
+# Sports Takeout · AI Agent Platform
 
-> 商业授权联系方式：请在 GitHub Issues 留言或联系项目维护者。
+**An AI-Powered O2O Personal Training Service System based on Spring Boot + LangGraph**
+
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-1.1.4-0f0f0f?logo=langchain)](https://langchain-ai.github.io/langgraph/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.3-brightgreen.svg)](https://spring.io/)
+[![Vue](https://img.shields.io/badge/Vue-3.x-green.svg)](https://vuejs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688)](https://fastapi.tiangolo.com/)
+[![Non-Commercial](https://img.shields.io/badge/Non--Commercial-License-red.svg)](#license)
+
+[Back to Top](#体育外卖--ai-智能体平台)
+
+---
+
+## Overview
+
+**Sports Takeout** is an AI-powered O2O (Online-to-Offline) platform for door-to-door personal training services. Our mission is to **bring the gym to your home** — certified trainers bring portable equipment (resistance bands, kettlebells, yoga mats, body composition scales, etc.) directly to clients' homes for one-on-one scientific training sessions, including fat loss, muscle gain, stretching, and postpartum recovery.
+
+This project extends a traditional O2O business system with an independent **AI microservice** (`ai-service`) built on the LangGraph Agent framework, providing intelligent coach recommendation, review summarization, and certificate verification capabilities — creating a dual-engine architecture combining conventional business logic with AI agents.
+
+## Key Features
+
+- **🤖 Multi-Agent Architecture**: Coach Recommendation Agent + Review Summary Agent + Certificate Verification Agent + Supervisor Router
+- **🔍 Hybrid RAG**: BM25 sparse retrieval + vector recall + RRF fusion, with Chroma/pgvector backend switching
+- **🔄 Loop Engineering**: Conditional routing, retry loops, HITL (Human-in-the-Loop), self-reflection
+- **🛡️ Production Hardening**: Deadlock-free distributed locks, Checkpointer state persistence, rate limiting & circuit breaking, token budget controls
+- **🔌 MCP Tool Layer**: Cross-language tool reuse — Spring Boot business interfaces exposed as MCP Tools for AI agents
+- **📊 Observability**: Audit logging, metrics, trace tracking, prompt versioning
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Frontend
+        U[User Mini-Program]
+        C[Coach Mini-Program]
+        A[Admin Web]
+    end
+
+    subgraph Backend
+        direction TB
+        SB[Spring Boot Main]
+        AI[AI Microservice · FastAPI + LangGraph]
+    end
+
+    subgraph Storage
+        MySQL[(MySQL 8.0)]
+        Redis[(Redis 7)]
+        Vector[(Chroma / pgvector)]
+    end
+
+    subgraph AI Agents
+        direction LR
+        A1[Coach Recommend]
+        A2[Review Summary]
+        A3[Cert Verification]
+        A4[Supervisor]
+    end
+
+    subgraph RAG Layer
+        BM25[BM25 Sparse]
+        EMB[Embedding]
+        RRF[RRF Fusion]
+    end
+
+    U --> SB
+    C --> SB
+    A --> SB
+    SB --> MySQL
+    SB --> Redis
+    SB -->|AI Call| AI
+
+    AI --> A4
+    A4 --> A1
+    A4 --> A2
+    A4 --> A3
+
+    A1 --> RAG Layer
+    RAG Layer --> Vector
+    A1 --> MySQL
+    A2 --> MySQL
+    A3 --> MySQL
+
+    AI --> Redis
+    AI -->|Read-only| MySQL
+```
+
+## AI Microservice Details
+
+### Coach Recommendation Agent (recommend_coach)
+
+A three-node serial DAG pipeline:
+
+1. **Node 1 · Intent Extraction** (LLM): Natural language → structured intent (city, specialization, budget, time slot, etc.)
+2. **Node 2 · Retrieve & Rank** (Pure rules): MySQL query + 5-dimensional weighted scoring (rating/semantic/level/distance/slot)
+3. **Node 3 · Generate Reason** (LLM): Candidates → 2-3 sentence personalized recommendation
+
+### Review Summary Agent (review_summary)
+
+Batch analysis of historical user reviews with automatic tagging and summary generation.
+
+### Certificate Verification Agent (cert_review)
+
+OCR + database comparison + HITL human confirmation for coach certification verification.
+
+### Supervisor Router
+
+Unified entry point that routes user requests to the appropriate sub-agent with degradation support.
+
+## Quick Start
+
+### Prerequisites
+
+- Docker & Docker Compose
+- Python 3.11+
+- JDK 8+
+- Node.js 18+
+
+### One-Command Deployment (Recommended)
+
+```bash
+git clone <repo-url>
+cd sports-takeout
+
+# Configure environment variables
+cp .env.example .env
+# Edit .env to set API keys and passwords
+
+# Start all services including AI microservice
+docker-compose up -d
+```
+
+After startup, access:
+
+| Service | URL |
+|---------|-----|
+| Admin Web | http://localhost:5173 |
+| Spring Boot API | http://localhost:8080 |
+| AI Microservice | http://localhost:18000 |
+| AI API Docs | http://localhost:18000/docs |
+
+### AI Microservice Local Development
+
+```bash
+cd ai-service
+
+# Install dependencies
+pip install -e ".[dev]"
+
+# Configure
+cp .env.example .env
+# Edit .env with LLM API key, MySQL/Redis connection, etc.
+
+# Start the service
+python -m app.main
+
+# Run tests
+pytest tests/ -v
+```
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/healthz` | Health check |
+| GET | `/readyz` | Readiness probe (with dependency checks) |
+| POST | `/ai/recommend-coach` | Intelligent coach recommendation |
+| POST | `/ai/review-summary` | Review summary generation |
+| POST | `/ai/cert-review` | Intelligent certificate verification |
+
+**Recommendation Request:**
+```json
+POST /ai/recommend-coach
+{
+  "user_query": "Wangjing, budget under 200, postpartum recovery, weekend mornings",
+  "city_code_override": null,
+  "top_n": 3
+}
+```
+
+**Recommendation Response:**
+```json
+{
+  "intent": {
+    "city": "Beijing",
+    "district": "Wangjing",
+    "specialization": "Postpartum Recovery",
+    "tags": ["weekend", "morning"],
+    "price_max": 200
+  },
+  "candidates": [
+    {"coach_id": 1, "total_score": 0.89, "dimensions": {"rating": 0.4, "semantic": 0.32, "level": 0.09, "distance": 0.06, "slot": 0.02}}
+  ],
+  "recommend_reason": "For your postpartum recovery needs, we recommend Coach Zhang...",
+  "matched_course_name": "Home Postpartum Recovery Private Session",
+  "matched_course_price": 199.0,
+  "over_budget": false
+}
+```
+
+## Project Structure
+
+```
+sports-takeout/
+├── README.md                      # Project documentation (bilingual)
+├── LICENSE                        # Non-Commercial License
+├── PRD.md                         # Product Requirements Document
+├── DEPLOY.md                      # Deployment Guide
+├── docker-compose.yml             # Docker Compose orchestration
+├── .env.example                   # Environment variable template
+│
+├── ai-service/                    # AI Microservice (Core)
+│   ├── app/
+│   │   ├── clients/               # External clients (LLM/DB/Redis/Vector/Embedding/Reranker)
+│   │   ├── core/                  # Core capabilities (Checkpoint/Session/Security/Audit/Metrics)
+│   │   ├── eval/                  # Evaluation framework (Judge/Metric/Runner)
+│   │   ├── graphs/                # Agent graphs (Supervisor/Recommend/Review/Cert)
+│   │   ├── mcp/                   # MCP tool layer (Server/Client)
+│   │   ├── middleware/            # Middleware (Rate limit/Token budget/Request ID)
+│   │   ├── prompts/               # Prompt templates (YAML config)
+│   │   ├── schemas/               # Data models (Pydantic Schemas)
+│   │   ├── tools/                 # Tool registry (CoachTools/ReviewTools)
+│   │   ├── config.py              # Strong-type configuration center
+│   │   └── main.py                # FastAPI entrypoint
+│   ├── docs/                      # AI engineering documentation (12 docs)
+│   ├── tests/                     # Unit tests
+│   └── pyproject.toml             # Python project configuration
+│
+├── sky-take-out/                  # Spring Boot Main Backend
+│   ├── sky-common/                # Common module (constants/exceptions/utils)
+│   ├── sky-pojo/                  # Entities/DTOs/VOs
+│   └── sky-server/                # Spring Boot main application
+│
+├── admin-web/                     # Admin Web (Vue 3 + Element Plus)
+│
+└── docs/                          # Screenshots and resources
+```
+
+## Tech Stack
+
+### Backend (Spring Boot)
+
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| Spring Boot | 2.7.3 | Main backend framework |
+| MyBatis | 2.3.1 | ORM |
+| MySQL | 8.0 | Business database |
+| Redis | 7 | Cache / distributed lock |
+| JWT | - | Three-end auth isolation |
+| WebSocket | - | Real-time message push |
+
+### AI Microservice
+
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| Python | 3.11+ | Development language |
+| LangGraph | 1.1.4 | Agent orchestration framework |
+| langchain-core | ≥1.0 | Messaging core |
+| LiteLLM | 1.55.3 | Multi-provider LLM routing |
+| Pydantic | 2.10.4 | Strong-type data validation |
+| FastAPI | 0.115.6 | HTTP service framework |
+| uvicorn | 0.32.1 | ASGI server |
+| SQLAlchemy | 2.0.36 | Database access |
+| Redis (python) | 7.4.1 | Cache / Checkpointer |
+| langgraph-checkpoint-redis | 0.5.2 | Production state persistence |
+| rank-bm25 | 0.2.2 | Sparse retrieval |
+| Chroma / pgvector | - | Vector storage |
+
+### Frontend
+
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| uni-app | 2.x | WeChat Mini-Program (User/Coach) |
+| Vue 3 + Element Plus | 3.x | Admin PC Web |
+
+## Configuration
+
+### AI Microservice Core Config
+
+```env
+# ===== LLM Configuration =====
+LLM_MODEL=deepseek/deepseek-chat
+LLM_API_KEY=your-api-key
+LLM_BASE_URL=
+
+# ===== Database (read-only access) =====
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=your-password
+MYSQL_DATABASE=sports_takeout
+
+# ===== Redis (Cache + Checkpointer) =====
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DB=1
+
+# ===== Vector Store Backend =====
+# chroma (dev) / chroma_http (transition) / pgvector (production recommended)
+VECTOR_DB_BACKEND=chroma
+
+# ===== Feature Toggles =====
+HYBRID_RETRIEVAL_ENABLED=true
+RERANKER_ENABLED=false
+CHECKPOINTER_BACKEND=memory   # memory(dev) / redis(production)
+REVIEW_SUMMARY_ENABLED=true
+CERT_REVIEW_ENABLED=true
+```
+
+See [ai-service/.env.example](ai-service/.env.example) for all configuration options.
+
+## Three-End Features
+
+### User端 (WeChat Mini-Program)
+Course browsing · Coach list · Two order modes (direct/dispatch) · Time slot booking · Order tracking · Dual-dimensional reviews · Address management · WeChat login
+
+### Coach端 (WeChat Mini-Program)
+Registration · Certification upload · Schedule management · Order acceptance/claim · Navigation · Service reporting · Training records · Review viewing
+
+### Admin端 (PC Web)
+Coach verification · Course management · Order management · Dispatch pool monitoring · AI audit log viewer
+
+
+## Screenshots
+
+### User App · Course Browsing
+![User Home](docs/screenshots/user-home.png)
+
+### Coach App · Workbench
+![Coach Home](docs/screenshots/coach-home.png)
+
+### Admin Web · Coach Review
+![Admin Coach](docs/screenshots/admin-coach.png)
+
+## Order State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unpaid: Place order
+    Unpaid --> Pending: Payment success
+    Pending --> Scheduled: Coach confirmed / Dispatch claimed
+    Pending --> Rejected: Coach declined
+    Pending --> Cancelled: User cancelled / Dispatch timeout
+    Unpaid --> Cancelled: User cancelled
+    Scheduled --> InService: Coach started service
+    InService --> Completed: Coach finished service
+    Completed --> Reviewed: User reviewed (coach + course)
+```
+
+> Status codes: `1` Unpaid / `2` Pending / `3` Scheduled / `4` In Service / `5` Completed / `6` Cancelled / `7` Rejected
+
+## Database Design (14 Tables)
+
+| Table | Description | Table | Description |
+|-------|-------------|-------|-------------|
+| employee | Admin | course | Courses |
+| user | Customer | course_package | Training packages |
+| address_book | Delivery address | package_course | Package-Course relation |
+| category | Course category | dispatch_pool | Dispatch/claim pool |
+| coach | Coach | orders | Booking orders |
+| coach_certificate | Coach certificates | order_detail | Order details |
+| coach_schedule | Coach schedule | order_review | Order reviews |
+
+Full schema: `sql/sports_take_out.sql` (with seed data).
+
+## Payment Mode
+
+| Mode | Description |
+|------|-------------|
+| **Current (Simulated)** | `POST /user/order/payment` directly calls `paySuccess()`, skipping WeChat Pay for dev/demo |
+| **Real WeChat Pay** | Apply for merchant ID, configure `appid/mchid/apiV3Key/cert` in `application.yml`, replace mock call with `WeChatPayUtil.pay()` |
+
+> WeChat Pay SDK (`WeChatPayUtil`) is already integrated. Switching to real payment only requires configuration — no code rewrite needed.
+
+## Brand Customization
+
+| Item | Location | Description |
+|------|----------|-------------|
+| Platform name | Mini-program `pages/index` + Admin `App.vue` | Search & replace '体育外卖' |
+| Logo | Mini-program `static/` + Admin `public/` | Replace image files |
+| Theme color | Admin `src/styles/` + Mini-program `uni.scss` | Modify Element Plus / uni-app variables |
+| Course categories | Database `category` table | Edit seed data freely |
+
+## Acknowledgments
+
+This project is based on the "苍穹外卖" (sky-take-out, a Heima programmer training project) technical skeleton, redeveloped from the food delivery domain to the "door-to-door personal training" domain. Thanks to the original project for providing the scaffolding foundation.
+
+> ⚠️ This project is for learning, communication, and portfolio purposes. The AI microservice module is independently developed; the business foundation is partially refactored from a third-party training project.
+## Demo Accounts
+
+| Role | Account | Password |
+|------|---------|---------|
+| Admin (Admin Web) | admin | 123456 |
+| Coach (Verified) | 13900000001 | 123456 |
+| Coach (Pending) | 13900000003 | 123456 |
+| User (Dev) | Mock login | POST /user/user/mockLogin |
+
+
+## End-to-End Verification
+
+The following 10 API endpoints have been fully verified (2026-08-24):
+
+| # | Endpoint | Description | Status |
+|---|----------|-------------|--------|
+| 1 | `POST /admin/employee/login` | Admin login | ✅ |
+| 2 | `GET /admin/coach/page` | Coach pagination query | ✅ |
+| 3 | `POST /user/user/mockLogin` | User mock login | ✅ |
+| 4 | `GET /user/category/list?type=1` | Category list | ✅ |
+| 5 | `GET /user/course/list?categoryId=1` | Course list | ✅ |
+| 6 | `GET /user/coach/list` | Coach list | ✅ |
+| 7 | `POST /coach/coach/login` | Coach login | ✅ |
+| 8 | `GET /coach/order/dispatchPool` | Coach dispatch pool | ✅ |
+| 9 | `GET /admin/dispatchPool/list` | Admin dispatch pool | ✅ |
+| 10 | `GET /admin/order/statistics` | Order statistics | ✅ |
+
+## Documentation
+
+
+| Document | Description |
+|----------|-------------|
+| [PRD.md](PRD.md) | Product Requirements Document |
+| [DEPLOY.md](DEPLOY.md) | Deployment Guide |
+| [ai-service/docs/01-项目概览与路线图.md](ai-service/docs/01-项目概览与路线图.md) | AI service overview and roadmap |
+| [ai-service/docs/02-Agent工程能力地图.md](ai-service/docs/02-Agent工程能力地图.md) | Agent engineering capability map |
+| [ai-service/docs/03-循环工程.md](ai-service/docs/03-循环工程.md) | Loop engineering (branch/retry/HITL) |
+| [ai-service/docs/04-RAG混合检索.md](ai-service/docs/04-RAG混合检索.md) | Hybrid RAG retrieval |
+| [ai-service/docs/05-商业化加固.md](ai-service/docs/05-商业化加固.md) | Production hardening |
+| [ai-service/docs/06-Harness工程与评估.md](ai-service/docs/06-Harness工程与评估.md) | Evaluation and harness |
+| [ai-service/docs/07-MCP工具层.md](ai-service/docs/07-MCP工具层.md) | MCP tool layer |
+| [ai-service/docs/08-多Agent实现.md](ai-service/docs/08-多Agent实现.md) | Multi-Agent implementation |
+| [ai-service/docs/09-Agent面试题集.md](ai-service/docs/09-Agent面试题集.md) | Agent interview Q&A collection |
+| [ai-service/docs/10-上线检查清单.md](ai-service/docs/10-上线检查清单.md) | Production launch checklist |
+
+## License
+
+[![Non-Commercial](https://img.shields.io/badge/Non--Commercial-License-red.svg)](#license)
+
+This project is licensed under **AGPL-3.0 + Non-Commercial Additional Terms**. **All commercial use is strictly prohibited.**
+
+| Allowed | Prohibited |
+|---------|------------|
+| ✅ Personal learning & research | ❌ Commercial deployment |
+| ✅ Educational use (teaching/coursework) | ❌ Integration into commercial SaaS |
+| ✅ Internal evaluation & testing | ❌ Paid AI agent services |
+| ✅ Open-source community contributions | ❌ Resale or sublicensing |
+
+See the full [LICENSE](LICENSE) file for details. For collaboration or special licensing, please contact the project maintainers.

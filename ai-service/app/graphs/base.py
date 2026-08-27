@@ -46,6 +46,9 @@ class ConditionalRouter:
     builder.add_conditional_edges("root", router.route, router.edges())
     """
 
+    # 兜底 key：route() 返回的是「分支 key」，而非目标节点名；未知 key 归到 default 目标。
+    _DEFAULT_KEY = "__default__"
+
     def __init__(self, state_field: str, mapping: dict[str, str], default: Any = END) -> None:
         self.state_field = state_field
         self.mapping = mapping
@@ -53,10 +56,11 @@ class ConditionalRouter:
 
     def route(self, state: dict[str, Any]) -> Any:
         key = state.get(self.state_field)
-        return self.mapping.get(key, self.default)
+        return key if key in self.mapping else self._DEFAULT_KEY
 
     def edges(self) -> dict[str, Any]:
-        return dict(self.mapping)
+        # add_conditional_edges 的 path_map：分支 key → 目标节点；额外挂上兜底 key。
+        return {**self.mapping, self._DEFAULT_KEY: self.default}
 
 
 # =============================================================================

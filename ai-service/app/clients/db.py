@@ -20,13 +20,20 @@ _engine: Optional[Engine] = None
 
 
 def get_engine() -> Engine:
-    """惰性创建全局 engine（连接池）。用只读账号即可。"""
+    """惰性创建全局 engine（连接池）。用只读账号即可。
+
+    #05 显式配置池参数：默认 5 连接撑不住并发，池满即报错；显式 pool_size/max_overflow
+    让业务峰值（≥50 并发）不至于排队等连接。
+    """
     global _engine
     if _engine is None:
         _engine = create_engine(
             settings.mysql_dsn,
             pool_pre_ping=True,   # 取连接前先 ping，避免拿到失效连接
             pool_recycle=3600,
+            pool_size=settings.mysql_pool_size,
+            max_overflow=settings.mysql_max_overflow,
+            pool_timeout=settings.mysql_pool_timeout,
             echo=False,
             future=True,
         )
@@ -39,6 +46,31 @@ def fetch_all(sql: str, params: Optional[dict[str, Any]] = None) -> list[dict[st
         rows = conn.execute(text(sql), params or {})
         cols = list(rows.keys())
         return [dict(zip(cols, row)) for row in rows]
+
+
+def execute(sql: str, params: Optional[dict[str, Any]] = None) -> int:
+    """执行写操作（INSERT/UPDATE），返回受影响行数。用于审计日志等旁路写入。"""
+    with get_engine().begin() as conn:  # begin() 自动 commit / 异常回滚
+        result = conn.execute(text(sql), params or {})
+        return result.rowcount
+
+
+async def afetch_all(sql: str, params: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
+    """异步版 fetch_all。用线程池执行同步查询，不阻塞事件循环。
+
+    为什么不换 aiomysql 驱动：DB 读只有毫秒级，不是延迟瓶颈（LLM 才是），
+    `asyncio.to_thread` 复用已测试的同步 SQLAlchemy 层，零新依赖、零驱动迁移风险。
+    """
+    import asyncio
+
+    return await asyncio.to_thread(fetch_all, sql, params)
+
+
+async def aexecute(sql: str, params: Optional[dict[str, Any]] = None) -> int:
+    """异步版 execute。审计日志等旁路写入用（fire-and-forget）。"""
+    import asyncio
+
+    return await asyncio.to_thread(execute, sql, params)
 
 
 def is_db_available() -> bool:

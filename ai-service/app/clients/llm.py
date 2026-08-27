@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from collections.abc import Iterable
 from typing import Any, Optional, Type, TypeVar, cast
 
@@ -14,6 +15,7 @@ from litellm import acompletion, completion
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
+from app.core import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,12 @@ async def achat(messages: Iterable[dict[str, str]]) -> str:
         {"role": m["role"], "content": _strip_text(m.get("content", ""))}
         for m in messages
     ]
-    resp = await acompletion(messages=msgs, **_common_kwargs())
+    metrics.incr("llm_calls_total")
+    start = time.perf_counter()
+    try:
+        resp = await acompletion(messages=msgs, **_common_kwargs())
+    finally:
+        metrics.observe("llm_latency_ms", (time.perf_counter() - start) * 1000)
     try:
         return _strip_text(resp.choices[0].message.content)
     except (AttributeError, IndexError, KeyError) as exc:
@@ -130,8 +137,8 @@ def normalize_for_pydantic(raw: Any, expected_root_type: Type[T]) -> dict[str, A
     return normalized
 
 
-def chat_structured(messages: Iterable[dict[str, str]], output_schema: Type[T]) -> T:
-    """结构化输出：JSON Schema 提示词 + 代码侧归一化 + Pydantic 校验。"""
+def _build_structured_messages(messages: Iterable[dict[str, str]], output_schema: Type[T]) -> list[dict[str, str]]:
+    """把 JSON Schema 拼进 system prompt，作为结构化输出的约束。"""
     schema_json = output_schema.model_json_schema()
     system_with_schema = (
         "你是一个严格的 JSON 生成器。只根据给定的 JSON Schema 输出结果，"
@@ -139,14 +146,22 @@ def chat_structured(messages: Iterable[dict[str, str]], output_schema: Type[T]) 
         f"JSON Schema:\n{json.dumps(schema_json, ensure_ascii=False)}\n"
         "直接输出满足 schema 的 JSON object。"
     )
-    msgs = [{"role": "system", "content": system_with_schema}, *list(messages)]
-    raw_text = chat(msgs)
+    return [{"role": "system", "content": system_with_schema}, *list(messages)]
 
+
+def _parse_structured(raw_text: str, output_schema: Type[T]) -> T:
+    """解析 LLM 文本 → dict → 归一化 → Pydantic 校验。失败抛 RuntimeError/ValidationError。"""
     parsed: Any
     try:
         parsed = json.loads(raw_text)
     except json.JSONDecodeError:
-        cleaned = raw_text.strip().removeprefix("```json").removeprefix("```JSON").removesuffix("```").strip()
+        cleaned = (
+            raw_text.strip()
+            .removeprefix("```json")
+            .removeprefix("```JSON")
+            .removesuffix("```")
+            .strip()
+        )
         try:
             parsed = json.loads(cleaned)
         except json.JSONDecodeError as exc:
@@ -171,6 +186,49 @@ def chat_structured(messages: Iterable[dict[str, str]], output_schema: Type[T]) 
         raise
 
 
+def chat_structured(messages: Iterable[dict[str, str]], output_schema: Type[T]) -> T:
+    """结构化输出（同步）：JSON Schema 提示词 + 代码侧归一化 + Pydantic 校验。"""
+    msgs = _build_structured_messages(messages, output_schema)
+    return _parse_structured(chat(msgs), output_schema)
+
+
+async def achat_structured(messages: Iterable[dict[str, str]], output_schema: Type[T]) -> T:
+    """结构化输出（异步）：用 acompletion，避免阻塞事件循环。"""
+    msgs = _build_structured_messages(messages, output_schema)
+    return _parse_structured(await achat(msgs), output_schema)
+
+
+async def achat_structured_with_retry(
+    messages: Iterable[dict[str, str]],
+    output_schema: Type[T],
+    max_retries: int = 2,
+) -> T:
+    """带修正提示重试的结构化输出（异步）。
+
+    关键：与 LiteLLM 内置 num_retries 分层——内置只处理 HTTP 层重试，
+    这里处理「格式错误 / schema 校验失败」这类业务层错误：每次把错误喂回 LLM，
+    让它看到自己上次错在哪，再输出一次。耗尽后抛最后异常，由调用方走 mock 兜底。
+    """
+    all_messages = list(messages)
+    last_exc: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            return await achat_structured(all_messages, output_schema)
+        except (RuntimeError, ValidationError) as exc:
+            last_exc = exc
+            if attempt == max_retries:
+                break
+            correction = (
+                f"你上次的输出有问题：{exc!s}\n"
+                "请严格按 JSON Schema 重新输出，不要包含任何 markdown 或多余字符。"
+            )
+            all_messages = all_messages + [{"role": "user", "content": correction}]
+            logger.warning("[achat_structured] 第 %d 次失败，带修正重试：%s", attempt + 1, exc)
+
+    assert last_exc is not None
+    raise last_exc
+
+
 # =============================================================================
 # 3. Mock（离线 demo：没配 api_key 或 AI_MOCK=1 时自动走假数据）
 # =============================================================================
@@ -178,6 +236,15 @@ def is_mock_mode() -> bool:
     if os.environ.get("AI_MOCK", "").lower() in {"1", "true", "yes", "on"}:
         return True
     return not settings.llm_api_key
+
+
+def is_mock_db() -> bool:
+    """是否强制用本地 mock 教练/课程库（不读 MySQL）。
+
+    与 is_mock_mode 区分：AI_MOCK 只 mock LLM；AI_MOCK_DB 只 mock 数据。
+    Eval / 冒烟测试同时开两个，得到「完全离线、确定性」的结果，不依赖 MySQL 状态。
+    """
+    return os.environ.get("AI_MOCK_DB", "").lower() in {"1", "true", "yes", "on"}
 
 
 def mock_structured(output_schema: Type[T], fallback: Optional[T] = None) -> T:

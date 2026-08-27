@@ -1,30 +1,37 @@
 """教练推荐 Graph（LangGraph + LiteLLM + Pydantic）。
 
-拓扑（3 节点串行 + START → END）：
+拓扑（带条件分支 + 循环，Phase 1 Loop 工程）：
 
-  ┌───────────────┐   ┌───────────────────┐   ┌────────────────────────┐
-  │ Node 1        │   │ Node 2            │   │ Node 3                 │
-  │ 意图抽取 LLM  │──▶│ 结构化检索 + 打分 │──▶│ 推荐理由生成 LLM       │
-  │ 结构化 JSON   │   │ 纯 SQL/规则，无LLM│   │ 自然语言 2~3 句        │
-  └───────────────┘   └───────────────────┘   └────────────────────────┘
-          ▲                       ▲                         │
-          │                       │                         ▼
-   用户自然语言            MySQL coach 表              RecommendResult
+  START → extract_intent ──► retrieve_and_rank ──┬─(route="reason")──► generate_reason ──┬─(route="done")──► END
+                                                 │                                       │
+                                                 └─(route="refine")─► relax_filters ─────┘  └─(route="rewrite")─► generate_reason (自循环)
+
+  • Node 1（extract_intent）：LLM 抽取意图，失败自动重试（累加修正提示），耗尽回退 mock 规则。
+  • Node 2（retrieve_and_rank）：SQL + 规则打分，空结果触发 refine 循环（确定性放宽过滤后重查）。
+  • relax_filters：按优先级清掉 male_only→min_rating→level→city 等硬过滤条件，回 Node 2 重查。
+  • Node 3（generate_reason）：生成推荐理由 + 质量门控（空/过长/无教练名 → 带反馈重写）。
 
 设计要点：
   • Node 2 不调用 LLM，用「结构化条件 + 规则打分 + SQL」——
     这比让 LLM 在成百上千教练里选 Top3 更准、也便宜 10 倍。
   • 只有 Node 1（自然语言 → 条件）、Node 3（生成人话理由）才用 LLM。
   • 全程 Pydantic 强类型 + normalize 结构适配层，拒绝 LLM 漂移引发硬失败。
+  • 所有循环都有 refine_count / reason_attempts 硬上限，保证图必终止。
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Optional, TypedDict
 
-from app.clients.db import fetch_all
-from app.clients.llm import chat, chat_structured, is_mock_mode, mock_structured
-from app.graphs.base import END, START, StateGraph
+from app.clients.circuit_breaker import llm_breaker
+from app.clients.hybrid import hybrid_match_scores
+from app.clients.llm import achat, achat_structured, is_mock_mode
+from app.clients.trace import trace_node
+from app.graphs.base import END, START, ConditionalRouter, StateGraph
+from app.prompts.loader import load_prompt
+from app.tools.coach_tools import fetch_coaches, fetch_courses, fetch_slots
+from app.core.checkpoint import build_checkpointer
+from app.core.safety import wrap_user_input
 from app.schemas.coach_recommend import (
     CoachCandidate,
     IntentExtraction,
@@ -32,6 +39,14 @@ from app.schemas.coach_recommend import (
 )
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# Loop 工程（Phase 1）参数：循环/重试/门控的硬上限，保证图必终止。
+# =============================================================================
+MAX_INTENT_RETRIES = 3    # Node1 意图抽取失败重试次数
+MAX_REFINE = 3            # Node2 空结果 → 放宽过滤的最大轮数
+MAX_REASON_RETRIES = 2    # Node3 推荐理由质量不达标的重写次数
+REASON_MAX_LEN = 120      # 推荐理由长度上限（字），超过即判质量不达标
 
 
 # =============================================================================
@@ -50,44 +65,75 @@ class RecommendState(TypedDict, total=False):
     # 最终输出
     result: dict[str, Any]          # RecommendResult.model_dump()
     used_mock: bool                 # 是否走了 mock 路径
+    # Loop 控制字段（Phase 1）：条件路由 + 循环计数
+    route: str                      # ConditionalRouter 的分支 key（Node2/Node3 写回）
+    intent_errors: list[str]        # Node1 每次抽取失败原因（累加修正提示）
+    refine_count: int               # Node2 空结果后已放宽过滤的次数
+    reason_attempts: int            # Node3 推荐理由已重写次数
+    reason_feedback: str            # Node3 上次理由被拒原因（喂回重写）
 
 
 # =============================================================================
 # Node 1：用户自然语言 → 结构化筛选条件（IntentExtraction）
 # =============================================================================
-SYSTEM_NODE1 = """你是一个「上门私教教练推荐」的结构化意图抽取器。
-只根据用户一句话，输出 JSON：
-  - city_name/district：用户提到的服务城市 / 商圈；
-  - specialization / specialization_tags：用户的健身目标（减脂/增肌/拉伸/产后恢复等）；
-  - level/min_rating：如果用户提到"金牌教练""至少 4.5 分"等则抽取；
-  - max_price：用户预算；
-  - time_slot：用户提到的时段；
-  - male_only：用户明确要求男教练 True、女教练 False、没提则 null；
-  - user_goal：用户一句话目标（用于推荐理由个性化）。
-
-不要编造用户没提到的条件，没提一律 null / []。
-"""
+SYSTEM_NODE1 = load_prompt("recommend_node1_intent")
 
 
-def extract_intent(state: RecommendState) -> dict[str, Any]:
-    """Node 1。返回 {'intent': IntentExtraction dict, 'used_mock': bool}"""
+def _build_node1_system(errors: list[str]) -> str:
+    """把历史失败原因拼进 Node1 system prompt，作为下一轮的修正提示。"""
+    if not errors:
+        return SYSTEM_NODE1
+    tips = "\n".join(f"- {e}" for e in errors[-3:])  # 只带最近 3 条，防 prompt 膨胀
+    return (
+        SYSTEM_NODE1
+        + "\n\n【重试提示】你之前的输出不合法，请严格输出符合 schema 的 JSON 并修正以下问题：\n"
+        + tips
+    )
+
+
+async def _extract_intent_llm(user_query: str, errors: list[str]) -> dict[str, Any]:
+    """Node1 的 LLM 抽取（含重试 + 修正提示累加）。失败抛异常，由 extract_intent 兜底 mock。
+
+    分层（#05）：LiteLLM 内置 num_retries 处理 HTTP 重试 → 这里处理「格式/校验失败」的
+    业务重试（累加修正提示）→ 最外层熔断器（连续失败快速失败）。
+    """
+    for attempt in range(1, MAX_INTENT_RETRIES + 1):
+        try:
+            intent_obj = await achat_structured(
+                messages=[
+                    {"role": "system", "content": _build_node1_system(errors)},
+                    {"role": "user", "content": wrap_user_input(user_query)},
+                ],
+                output_schema=IntentExtraction,
+            )
+            return intent_obj.model_dump()
+        except Exception as exc:  # noqa: BLE001
+            msg = f"第 {attempt} 次失败：{exc}"
+            errors.append(msg)
+            logger.warning("[Recommend Node1] 意图抽取失败（%s）", msg)
+    raise RuntimeError(f"意图抽取重试 {MAX_INTENT_RETRIES} 次仍失败")
+
+
+@trace_node("extract_intent")
+async def extract_intent(state: RecommendState) -> dict[str, Any]:
+    """Node 1（异步）。LLM 抽取经熔断器 + 重试，耗尽后回退 mock 规则抽取。"""
     user_query = state.get("user_query") or ""
     city_override = state.get("city_code_override")
     used_mock = False
+    errors: list[str] = list(state.get("intent_errors") or [])
 
     if is_mock_mode():
         logger.info("[Recommend Node1] Mock 模式：用规则抽取 fallback")
         intent = _mock_extract_intent(user_query)
         used_mock = True
     else:
-        intent_obj = chat_structured(
-            messages=[
-                {"role": "system", "content": SYSTEM_NODE1},
-                {"role": "user", "content": user_query},
-            ],
-            output_schema=IntentExtraction,
-        )
-        intent = intent_obj.model_dump()
+        try:
+            # 熔断器包裹「重试 + LLM」：LLM 连续失败到阈值后，后续请求快速失败，不再傻等 60s
+            intent = await llm_breaker.call(_extract_intent_llm, user_query, errors)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Recommend Node1] LLM 抽取失败（可能已熔断），降级 mock：%s", exc)
+            intent = _mock_extract_intent(user_query)
+            used_mock = True
 
     # 小程序端如果已经知道城市（通过定位/用户配置），直接覆盖 LLM 结果，避免"我在朝阳"→ 城市被抽成别的
     if city_override:
@@ -95,7 +141,7 @@ def extract_intent(state: RecommendState) -> dict[str, Any]:
 
     # 保证 specialization_tags 始终是 list
     intent.setdefault("specialization_tags", [])
-    return {"intent": intent, "used_mock": used_mock}
+    return {"intent": intent, "used_mock": used_mock, "intent_errors": errors}
 
 
 # ---------------------------------------------------------------------------
@@ -143,10 +189,10 @@ def _mock_extract_intent(query: str) -> dict[str, Any]:
     if "高级" in q and d["level"] is None:
         d["level"] = 3
 
-    # 价格：找数字 + 元/块/以内/以下
+    # 价格：优先「预算 N」写法，否则找数字 + 元/块/以内/以下
     import re
 
-    m = re.search(r"(\d+)\s*(?:元|块|以内|以下|/次|每次|一次)", q)
+    m = re.search(r"预算\s*(\d+)", q) or re.search(r"(\d+)\s*(?:元|块|以内|以下|/次|每次|一次)", q)
     if m:
         d["max_price"] = float(m.group(1))
 
@@ -181,97 +227,8 @@ _SPEC_SYNONYMS: dict[str, list[str]] = {
     "青少年": ["青少年", "儿童", "少儿"],
 }
 
-# 本地"假教练库 / 假课程目录"：MySQL 不可用时的离线兜底，与 SQL 种子保持一致。
-_MOCK_COACHES: list[dict[str, Any]] = [
-    {"coach_id": 1, "name": "李教练", "sex": "1", "level": 4, "rating": 4.9,
-     "service_radius_km": 8.0, "city_name": "北京市", "bio": "国职认证，专注减脂塑形 8 年"},
-    {"coach_id": 2, "name": "王教练", "sex": "2", "level": 3, "rating": 4.8,
-     "service_radius_km": 5.0, "city_name": "北京市", "bio": "擅长增肌与体能训练"},
-    {"coach_id": 3, "name": "张教练", "sex": "1", "level": 2, "rating": 4.7,
-     "service_radius_km": 10.0, "city_name": "北京市", "bio": "运动康复方向，产后恢复经验丰富"},
-]
-
-_MOCK_COURSES: list[dict[str, Any]] = [
-    {"category": "减脂塑形", "name": "上门减脂私教课", "price": 199.0},
-    {"category": "增肌训练", "name": "上门增肌训练课", "price": 229.0},
-    {"category": "拉伸放松", "name": "拉伸放松课", "price": 129.0},
-]
-
-
-# ---------------------------------------------------------------------------
-# 数据获取：MySQL 只读（失败回退 mock）
-# ---------------------------------------------------------------------------
-def _normalize_coach(c: dict[str, Any]) -> dict[str, Any]:
-    """把 DB 行 / mock 行统一成下游用到的 coach 结构。"""
-    return {
-        "coach_id": int(c.get("coach_id", c.get("id"))),
-        "name": c.get("name", ""),
-        "sex": c.get("sex"),
-        "level": int(c.get("level") or 1),
-        "rating": float(c.get("rating") or 0),
-        "service_radius_km": float(c.get("service_radius_km") or 0),
-        "city_name": c.get("city_name") or "",
-        "bio": c.get("bio") or "",
-    }
-
-
-def _fetch_coaches(city_name: Optional[str]) -> list[dict[str, Any]]:
-    """取「已审核正常(status=1)」教练；MySQL 失败/无结果回退 mock。"""
-    try:
-        sql = (
-            "SELECT id, name, sex, level, rating, service_radius_km, city_code, city_name, bio "
-            "FROM coach WHERE status = 1"
-        )
-        params: dict[str, Any] = {}
-        if city_name:
-            sql += " AND city_name = :city_name"
-            params["city_name"] = city_name
-        rows = fetch_all(sql, params)
-        if rows:
-            return [_normalize_coach(r) for r in rows]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("MySQL 教练查询失败，回退 mock：%s", exc)
-    return [_normalize_coach(c) for c in _MOCK_COACHES]
-
-
-def _fetch_courses() -> list[dict[str, Any]]:
-    """课程目录（course JOIN category，仅起售/课程分类）。失败回退 mock。"""
-    try:
-        sql = (
-            "SELECT c.name AS name, c.price AS price, cat.name AS category "
-            "FROM course c LEFT JOIN category cat ON c.category_id = cat.id "
-            "WHERE c.status = 1 AND cat.type = 1"
-        )
-        rows = fetch_all(sql)
-        if rows:
-            return [
-                {"name": r.get("name"), "price": float(r.get("price") or 0),
-                 "category": r.get("category") or ""}
-                for r in rows
-            ]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("MySQL 课程目录查询失败，回退 mock：%s", exc)
-    return list(_MOCK_COURSES)
-
-
-def _fetch_available_slots(coach_ids: list[int]) -> Optional[dict[int, list[str]]]:
-    """每个教练「未来可约」时段 {coach_id: [time_slot,...]}；MySQL 失败返回 None。"""
-    if not coach_ids:
-        return {}
-    try:
-        placeholders = ", ".join(str(int(i)) for i in coach_ids)
-        sql = (
-            "SELECT coach_id, time_slot FROM coach_schedule "
-            f"WHERE status = 1 AND schedule_date >= CURDATE() AND coach_id IN ({placeholders})"
-        )
-        rows = fetch_all(sql)
-        slots: dict[int, list[str]] = {}
-        for r in rows:
-            slots.setdefault(int(r["coach_id"]), []).append(r["time_slot"])
-        return slots
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("MySQL 排期查询失败，档期按默认处理：%s", exc)
-        return None
+# 数据获取（教练/课程/档期）已抽到 app/tools/coach_tools.py 作为可复用工具，
+# 供多 Agent 共享 + MCP Server 对外暴露（#07 MCP 工具层）。
 
 
 # ---------------------------------------------------------------------------
@@ -385,8 +342,9 @@ def _distance_score(service_radius_km: float) -> int:
     return min(100, int(float(service_radius_km or 0) / 15.0 * 100))
 
 
-def retrieve_and_rank(state: RecommendState) -> dict[str, Any]:
-    """Node 2：真读 MySQL（失败回退 mock）+ 5 维加权打分，返回 candidates + 匹配课程。"""
+@trace_node("retrieve_and_rank")
+async def retrieve_and_rank(state: RecommendState) -> dict[str, Any]:
+    """Node 2（异步）：真读 MySQL（失败回退 mock）+ 5 维加权打分，返回 candidates + 匹配课程。"""
     intent = state.get("intent") or {}
     top_n = int(state.get("top_n") or 3)
     max_price = intent.get("max_price")
@@ -397,11 +355,12 @@ def retrieve_and_rank(state: RecommendState) -> dict[str, Any]:
     target_tags: list[str] = intent.get("specialization_tags") or []
     time_slot = intent.get("time_slot")
     male_only = intent.get("male_only")
+    user_query = state.get("user_query") or ""  # 混合检索（#04）用原文做 BM25/向量召回
 
-    # ---- 1. 取数据（教练 / 课程目录 / 档期）----
-    coaches = _fetch_coaches(city_name)
-    courses = _fetch_courses()
-    slots = _fetch_available_slots([c["coach_id"] for c in coaches])  # None=DB 不可用
+    # ---- 1. 取数据（教练 / 课程目录 / 档期）—— 走工具层（#07）----
+    coaches = await fetch_coaches(city_name=city_name)
+    courses = await fetch_courses()
+    slots = await fetch_slots([c["coach_id"] for c in coaches])  # None=DB 不可用
 
     # ---- 2. 关键词 + 匹配课程 + 预算过滤 ----
     keywords = _expand_keywords(target_spec, target_tags)
@@ -426,17 +385,42 @@ def retrieve_and_rank(state: RecommendState) -> dict[str, Any]:
             continue
         filtered.append(c)
 
-    # 一个都没命中就降过滤条件（兜底：至少给 top_n 个参考）
+    # 一个都没命中 → 触发 refine loop（确定性放宽后重查）；放宽耗尽才降级到全量兜底
+    refine_count = int(state.get("refine_count") or 0)
+    if not filtered and refine_count < MAX_REFINE:
+        logger.info("[Recommend Node2] 硬过滤后候选为空，触发放宽（第 %d 轮）", refine_count + 1)
+        return {
+            "route": "refine",
+            "candidates": [],
+            "matched_course": matched_course,
+            "over_budget": over_budget,
+        }
     if not filtered:
+        # 放宽耗尽仍为空：回退全量候选，保证至少给 top_n 个参考
         filtered = list(coaches)
 
     # ---- 4. 5 维打分 + 加权综合 ----
     bucket = _time_bucket(time_slot)
+
+    # 混合检索（#04）：BM25(+向量)+RRF 算出的语义相关度 {coach_id: 0~1}，覆盖语义匹配维。
+    # 不可用 / 无召回时返回 {}，下面逐教练退回 `_match_bio_score` 子串匹配，行为与 #03 一致。
+    hybrid_scores = hybrid_match_scores(user_query, filtered)
+    if hybrid_scores:
+        logger.info(
+            "[Recommend Node2] 混合检索命中 %d 位教练，语义匹配维切换为 BM25/RRF 相关度",
+            len(hybrid_scores),
+        )
+
     candidates: list[CoachCandidate] = []
     for c in filtered:
+        cid = int(c["coach_id"])
         score_rating = int(float(c.get("rating") or 0) / 5.0 * 100)
         score_level = int(int(c.get("level") or 1) / 4.0 * 100)
-        score_match = _match_bio_score(c.get("bio") or "", keywords)
+        if cid in hybrid_scores:
+            # 混合相关度（0~1）→ 0~100，替代子串匹配作为语义匹配分
+            score_match = max(0, min(100, int(hybrid_scores[cid] * 100)))
+        else:
+            score_match = _match_bio_score(c.get("bio") or "", keywords)
         score_distance = _distance_score(c.get("service_radius_km") or 0)
         if slots is None:
             ratio = 1.0  # DB 不可用，档期一律按「有空」处理
@@ -479,6 +463,7 @@ def retrieve_and_rank(state: RecommendState) -> dict[str, Any]:
     candidates.sort(key=lambda x: x.score_total, reverse=True)
     top = candidates[:top_n]
     return {
+        "route": "reason",
         "candidates": [c.model_dump() for c in top],
         "matched_course": matched_course,
         "over_budget": over_budget,
@@ -486,17 +471,41 @@ def retrieve_and_rank(state: RecommendState) -> dict[str, Any]:
 
 
 # =============================================================================
+# Refine 节点：Node2 空结果 → 确定性放宽硬过滤条件 → 回 Node2 重查
+# =============================================================================
+@trace_node("relax_filters")
+async def relax_filters(state: RecommendState) -> dict[str, Any]:
+    """refine 节点（异步）：确定性放宽硬过滤条件，再回 retrieve_and_rank 重查。
+
+    放宽顺序（按「越容易过度约束越先放」）：
+      第 1 次：清性别(male_only) + 最低评分(min_rating)
+      第 2 次：清等级(level)
+      第 3 次及以后：清城市(city_name)
+    """
+    intent = dict(state.get("intent") or {})
+    refine = int(state.get("refine_count") or 0) + 1
+    if refine == 1:
+        intent["male_only"] = None
+        intent["min_rating"] = None
+    elif refine == 2:
+        intent["level"] = None
+    else:
+        intent["city_name"] = None
+    logger.info(
+        "[Recommend refine] 放宽过滤第 %d 轮：male_only=%s min_rating=%s level=%s city=%s",
+        refine,
+        intent.get("male_only"),
+        intent.get("min_rating"),
+        intent.get("level"),
+        intent.get("city_name"),
+    )
+    return {"intent": intent, "refine_count": refine}
+
+
+# =============================================================================
 # Node 3：根据用户目标 + Top 教练，生成 2~3 句推荐理由（LLM）
 # =============================================================================
-SYSTEM_NODE3 = """你是「体育外卖」平台的健身顾问。你的任务：
-根据用户目标和系统筛选出的 Top 教练列表，写 2~3 句自然语言推荐理由。
-要求：
-  - 语气真诚、口语化，避免硬广；
-  - 结合用户具体目标（如产后恢复 / 减脂备婚），别空泛说"很棒很专业"；
-  - 至少点出 2 位教练的 1 个差异化卖点（如「李教练评分 4.9 专注减脂 8 年」vs「张教练做产后恢复更有经验」）；
-  - 100 字以内。
-输出纯文本即可，不要 JSON。
-"""
+SYSTEM_NODE3 = load_prompt("recommend_node3_reason")
 
 
 def _mock_generate_reason(
@@ -519,14 +528,33 @@ def _mock_generate_reason(
     )
 
 
-def generate_reason(state: RecommendState) -> dict[str, Any]:
-    """Node 3：生成推荐理由 + 组装最终 RecommendResult。"""
+def _reason_quality_issue(reason: str, candidates: list[dict[str, Any]]) -> Optional[str]:
+    """推荐理由质量门控：返回 None 表示合格，否则返回「不合格原因」。
+
+    判定：空 / 超过长度上限 / 没提到任何候选教练姓名。
+    """
+    reason = (reason or "").strip()
+    if not reason:
+        return "推荐理由为空"
+    if len(reason) > REASON_MAX_LEN:
+        return f"推荐理由超过 {REASON_MAX_LEN} 字（当前 {len(reason)} 字）"
+    names = [c.get("name") for c in (candidates or [])]
+    if names and not any(n and n in reason for n in names):
+        return "推荐理由没有提到任何候选教练姓名"
+    return None
+
+
+@trace_node("generate_reason")
+async def generate_reason(state: RecommendState) -> dict[str, Any]:
+    """Node 3（异步）：生成推荐理由 + 质量门控（不达标带反馈重写）+ 组装最终 RecommendResult。"""
     user_query = state.get("user_query") or ""
     intent = state.get("intent") or {}
     candidates_dicts: list[dict[str, Any]] = state.get("candidates") or []
     matched_course = state.get("matched_course")
     over_budget = bool(state.get("over_budget"))
     used_mock = bool(state.get("used_mock")) or is_mock_mode()
+    reason_attempts = int(state.get("reason_attempts") or 0)
+    reason_feedback = state.get("reason_feedback")
 
     # 先把 candidates 还原成 Pydantic（保证结构合法）
     candidates_objs: list[CoachCandidate] = [
@@ -544,17 +572,41 @@ def generate_reason(state: RecommendState) -> dict[str, Any]:
             ]
         ) or "（无候选）"
         user = f"用户目标：{intent.get('user_goal') or user_query}"
+        if reason_feedback:
+            user += f"\n\n【重写要求】上次推荐理由被拒，原因：{reason_feedback}。请针对该问题重写。"
         try:
-            reason = chat(
-                messages=[
+            # 熔断器包裹 LLM 生成：连续失败快速失败，避免每次傻等超时
+            reason = await llm_breaker.call(
+                achat,
+                [
                     {"role": "system", "content": SYSTEM_NODE3},
                     {"role": "user", "content": f"{user}\n\n候选教练：\n{top_coaches_brief}"},
-                ]
+                ],
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Node3 推荐理由 LLM 失败，回退 mock：%s", exc)
             reason = _mock_generate_reason(intent, candidates_dicts, matched_course, over_budget)
             used_mock = True
+
+    # ---- 质量门控：不达标且未超重试上限 → 回本节点重写（self-loop）----
+    issue = _reason_quality_issue(reason, candidates_dicts)
+    if issue is not None and reason_attempts < MAX_REASON_RETRIES:
+        logger.info(
+            "[Recommend Node3] 理由质量不达标（%s），触发第 %d 次重写",
+            issue,
+            reason_attempts + 1,
+        )
+        return {
+            "route": "rewrite",
+            "reason_attempts": reason_attempts + 1,
+            "reason_feedback": issue,
+            "used_mock": used_mock,
+        }
+    if issue is not None:
+        # 重写耗尽仍不达标：回退 mock 模板（确定性可接受，保证终止）
+        logger.warning("[Recommend Node3] 理由重写 %d 次仍不达标，回退 mock 模板", MAX_REASON_RETRIES)
+        reason = _mock_generate_reason(intent, candidates_dicts, matched_course, over_budget)
+        used_mock = True
 
     # ---- 组装最终结果 ----
     result_obj = RecommendResult(
@@ -568,7 +620,7 @@ def generate_reason(state: RecommendState) -> dict[str, Any]:
         over_budget=over_budget,
         used_mock=used_mock,
     )
-    return {"result": result_obj.model_dump(), "used_mock": used_mock}
+    return {"route": "done", "result": result_obj.model_dump(), "used_mock": used_mock}
 
 
 # =============================================================================
@@ -577,21 +629,40 @@ def generate_reason(state: RecommendState) -> dict[str, Any]:
 _builder = StateGraph(RecommendState)
 _builder.add_node("extract_intent", extract_intent)
 _builder.add_node("retrieve_and_rank", retrieve_and_rank)
+_builder.add_node("relax_filters", relax_filters)
 _builder.add_node("generate_reason", generate_reason)
 
 _builder.add_edge(START, "extract_intent")
 _builder.add_edge("extract_intent", "retrieve_and_rank")
-_builder.add_edge("retrieve_and_rank", "generate_reason")
-_builder.add_edge("generate_reason", END)
 
-RECOMMEND_GRAPH = _builder.compile()
+# Node2 → 空结果走 refine 循环，有结果走理由生成
+_router_retrieve = ConditionalRouter(
+    state_field="route",
+    mapping={"refine": "relax_filters", "reason": "generate_reason"},
+    default="generate_reason",
+)
+_builder.add_conditional_edges("retrieve_and_rank", _router_retrieve.route, _router_retrieve.edges())
+_builder.add_edge("relax_filters", "retrieve_and_rank")
+
+# Node3 → 质量不达标回本节点重写，达标才结束
+_router_reason = ConditionalRouter(
+    state_field="route",
+    mapping={"rewrite": "generate_reason", "done": END},
+    default=END,
+)
+_builder.add_conditional_edges("generate_reason", _router_reason.route, _router_reason.edges())
+
+RECOMMEND_GRAPH = _builder.compile(checkpointer=build_checkpointer())
 """对外的推荐图。使用方式：
 
     from app.graphs.recommend_coach import RECOMMEND_GRAPH
-    state_out = RECOMMEND_GRAPH.invoke({
-        "user_query": "我家住望京，预算 200 以内，想产后恢复",
-        "top_n": 3,
-    })
+    state_out = RECOMMEND_GRAPH.invoke(
+        {
+            "user_query": "我家住望京，预算 200 以内，想产后恢复",
+            "top_n": 3,
+        },
+        config={"configurable": {"thread_id": "demo-1"}},  # checkpointer 要求 thread_id
+    )
     result = RecommendResult.model_validate(state_out["result"])
 """
 
@@ -601,5 +672,6 @@ __all__ = [
     "RECOMMEND_GRAPH",
     "extract_intent",
     "retrieve_and_rank",
+    "relax_filters",
     "generate_reason",
 ]

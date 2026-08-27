@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -60,7 +61,12 @@ TEST_CASES: list[dict[str, str]] = [
 
 
 def run_one(name: str, query: str) -> RecommendResult:
-    state_out = RECOMMEND_GRAPH.invoke({"user_query": query, "top_n": 3})
+    state_out = asyncio.run(
+        RECOMMEND_GRAPH.ainvoke(
+            {"user_query": query, "top_n": 3},
+            config={"configurable": {"thread_id": f"smoke-{name}"}},
+        )
+    )
     return RecommendResult.model_validate(state_out["result"])
 
 

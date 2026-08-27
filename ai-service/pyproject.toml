@@ -20,8 +20,14 @@ dependencies = [
     # —— 数据库：只读现有 sports_takeout MySQL ——
     "sqlalchemy==2.0.36",
     "pymysql==1.1.1",
+    # —— Redis：缓存 / 限流 / Token 预算 / Checkpointer（生产）——
+    "redis==7.4.1",                 # langgraph-checkpoint-redis 0.5.2 要求 redis<8.0
+    "langgraph-checkpoint-redis==0.5.2",  # RedisSaver（生产 Checkpointer，多副本共享 + 崩溃恢复）
     # —— 工具 ——
     "python-dotenv==1.0.1",
+    # —— 混合检索（#04，轻量降级方案：BM25 纯 Python 离线可跑；向量/重排重依赖暂不引入）——
+    "rank-bm25==0.2.2",            # BM25 稀疏召回
+    "jieba==0.42.1",               # 中文分词（BM25 建索引/查询用）
 ]
 
 [project.optional-dependencies]
@@ -29,7 +35,29 @@ dev = [
     "pytest==8.3.3",
     "rich==13.9.4",
 ]
+# 向量召回依赖（三选一，按选的后端装）：
+#   chroma 模式      → pip install -e ".[vector-chroma]"
+#   chroma_http 模式 → pip install -e ".[vector-chroma]"（同包，HttpClient 内置）
+#   pgvector 模式    → pip install -e ".[vector-pgvector]"
+# 两个都装也行（通过 VECTOR_DB_BACKEND 配置切换）：
+#   pip install -e ".[vector-all]"
+vector-chroma = [
+    "chromadb>=0.5.0",            # Chroma 向量库（PersistentClient + HttpClient）
+]
+vector-pgvector = [
+    "psycopg2-binary>=2.9.9",     # PostgreSQL 驱动（pgvector 后端）
+]
+vector-all = [
+    "chromadb>=0.5.0",
+    "psycopg2-binary>=2.9.9",
+]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["prompts/*.yaml"]

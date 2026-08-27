@@ -1,0 +1,191 @@
+# 教练推荐 Eval 标注数据集（#06 Harness 工程）
+# 字段：
+#   - query: 用户自然语言
+#   - expected_intent: 期望意图（只标关注的字段，None 的字段不参与打分）
+#   - expected_coach_ids_subset: 期望 Top-K 中至少包含的 coach_id 之一
+#   - tags: 分类标签（happy_path / 边界 / 兜底）
+#
+# 说明：mock 模式（AI_MOCK=1）下 intent 由关键词规则抽取，expected_intent 与规则对齐；
+#       真实 LLM 模式下 expected_intent 才是真正的「标注 ground truth」，可据此评估 LLM。
+
+- id: eval_001
+  name: 产后恢复+预算+时段
+  query: "我家住望京，预算 200 以内，想产后恢复，最好周末上午"
+  expected_intent:
+    city_name: "北京市"
+    district: "望京"
+    specialization: "产后恢复"
+    max_price: 200
+    time_slot: "周末"
+  expected_coach_ids_subset: [3]
+  tags: [happy_path, 产后]
+
+- id: eval_002
+  name: 减脂+金牌教练
+  query: "想找金牌教练上门减脂塑形，要求评分高，在北京朝阳区"
+  expected_intent:
+    level: 4
+    specialization: "减脂塑形"
+    city_name: "北京市"
+    district: "朝阳区"
+  expected_coach_ids_subset: [1]
+  tags: [happy_path, 减脂]
+
+- id: eval_003
+  name: 增肌+便宜优先
+  query: "男生想增肌，预算有限，150块钱一次以内，工作日晚上有时间"
+  expected_intent:
+    specialization: "增肌训练"
+    max_price: 150
+    time_slot: "工作日晚上"
+  expected_coach_ids_subset: [2]
+  tags: [happy_path, 增肌]
+
+- id: eval_004
+  name: 纯开放目标（兜底）
+  query: "想找个教练上门上课"
+  expected_intent: {}
+  expected_coach_ids_subset: []
+  tags: [兜底]
+
+- id: eval_005
+  name: 拉伸放松
+  query: "最近肩颈酸痛，想找教练上门拉伸放松"
+  expected_intent:
+    specialization: "拉伸放松"
+  expected_coach_ids_subset: [3]
+  tags: [happy_path, 拉伸]
+
+- id: eval_006
+  name: 产后恢复（仅城市）
+  query: "北京产后恢复教练"
+  expected_intent:
+    city_name: "北京市"
+    specialization: "产后恢复"
+  expected_coach_ids_subset: [3]
+  tags: [happy_path, 产后]
+
+- id: eval_007
+  name: 减脂（仅时段）
+  query: "周末想减脂，找教练上门"
+  expected_intent:
+    time_slot: "周末"
+    specialization: "减脂塑形"
+  expected_coach_ids_subset: [1]
+  tags: [happy_path, 减脂]
+
+- id: eval_008
+  name: 增肌（仅预算）
+  query: "预算 180 增肌"
+  expected_intent:
+    specialization: "增肌训练"
+    max_price: 180
+  expected_coach_ids_subset: [2]
+  tags: [happy_path, 增肌]
+
+- id: eval_009
+  name: 金牌+减脂
+  query: "金牌教练减脂"
+  expected_intent:
+    level: 4
+    specialization: "减脂塑形"
+  expected_coach_ids_subset: [1]
+  tags: [happy_path, 减脂]
+
+- id: eval_010
+  name: 朝阳区拉伸
+  query: "朝阳区拉伸教练"
+  expected_intent:
+    city_name: "北京市"
+    district: "朝阳区"
+    specialization: "拉伸放松"
+  expected_coach_ids_subset: [3]
+  tags: [happy_path, 拉伸]
+
+- id: eval_011
+  name: 产后恢复+预算
+  query: "产后恢复，预算 300 以内"
+  expected_intent:
+    specialization: "产后恢复"
+    max_price: 300
+  expected_coach_ids_subset: [3]
+  tags: [happy_path, 产后]
+
+- id: eval_012
+  name: 减脂+金牌（倒装）
+  query: "减脂，找金牌教练"
+  expected_intent:
+    specialization: "减脂塑形"
+    level: 4
+  expected_coach_ids_subset: [1]
+  tags: [happy_path, 减脂]
+
+- id: eval_013
+  name: 增肌+周末
+  query: "周末增肌训练"
+  expected_intent:
+    time_slot: "周末"
+    specialization: "增肌训练"
+  expected_coach_ids_subset: [2]
+  tags: [happy_path, 增肌]
+
+- id: eval_014
+  name: 拉伸+晚上
+  query: "晚上想放松拉伸"
+  expected_intent:
+    time_slot: "工作日晚上"
+    specialization: "拉伸放松"
+  expected_coach_ids_subset: [3]
+  tags: [happy_path, 拉伸]
+
+- id: eval_015
+  name: 北京减脂
+  query: "北京减脂"
+  expected_intent:
+    city_name: "北京市"
+    specialization: "减脂塑形"
+  expected_coach_ids_subset: [1]
+  tags: [happy_path, 减脂]
+
+- id: eval_016
+  name: 产后恢复（纯目标）
+  query: "产后恢复"
+  expected_intent:
+    specialization: "产后恢复"
+  expected_coach_ids_subset: [3]
+  tags: [happy_path, 产后]
+
+- id: eval_017
+  name: 减脂+低预算
+  query: "减脂，预算 100"
+  expected_intent:
+    specialization: "减脂塑形"
+    max_price: 100
+  expected_coach_ids_subset: [1]
+  tags: [happy_path, 减脂]
+
+- id: eval_018
+  name: 北京增肌
+  query: "北京增肌"
+  expected_intent:
+    city_name: "北京市"
+    specialization: "增肌训练"
+  expected_coach_ids_subset: [2]
+  tags: [happy_path, 增肌]
+
+- id: eval_019
+  name: 金牌增肌
+  query: "金牌增肌教练"
+  expected_intent:
+    level: 4
+    specialization: "增肌训练"
+  expected_coach_ids_subset: [2]
+  tags: [happy_path, 增肌]
+
+- id: eval_020
+  name: 拉伸放松（纯目标）
+  query: "拉伸放松"
+  expected_intent:
+    specialization: "拉伸放松"
+  expected_coach_ids_subset: [3]
+  tags: [happy_path, 拉伸]

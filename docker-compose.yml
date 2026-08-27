@@ -19,6 +19,11 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ./sql/sports_take_out.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./ai-service/sql/ai_audit_log.sql:/docker-entrypoint-initdb.d/02-ai-audit.sql:ro
+      - ./ai-service/sql/ai_eval_online.sql:/docker-entrypoint-initdb.d/03-ai-eval-online.sql:ro
+      - ./ai-service/sql/ai_session_state.sql:/docker-entrypoint-initdb.d/04-ai-session-state.sql:ro
+      - ./ai-service/sql/coach_review.sql:/docker-entrypoint-initdb.d/05-coach-review.sql:ro
+      - ./ai-service/sql/coach_certificate.sql:/docker-entrypoint-initdb.d/06-coach-certificate.sql:ro
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
@@ -75,6 +80,38 @@ services:
     ports:
       - "5173:80"
     restart: unless-stopped
+
+  # AI 微服务：旁挂 Spring Boot 主后端的独立 AI 服务，只读 sports_takeout 库
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: sports-ai
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      LLM_MODEL: ${LLM_MODEL:-deepseek/deepseek-chat}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: sports_takeout
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 1
+      SERVICE_ENV: prod
+      CHECKPOINTER_BACKEND: redis
+      CHECKPOINT_TTL_MINUTES: 60
+      CHECKPOINT_DB_FALLBACK: "true"
+    ports:
+      - "18000:18000"
+    restart: unless-stopped
+    # 水平扩容：docker compose up --scale ai-service=3（限流/缓存/审计都基于 Redis，多副本天然一致）
 
 volumes:
   mysql_data:
