@@ -6,8 +6,8 @@ import com.sky.service.CoachScheduleService;
 import com.sky.service.CoachService;
 import com.sky.vo.CoachScheduleVO;
 import com.sky.vo.CoachVO;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -21,7 +21,7 @@ import java.util.List;
  */
 @RestController("userCoachController")
 @RequestMapping("/user/coach")
-@Api(tags = "C端-教练浏览接口")
+@Tag(name = "C端-教练浏览接口")
 @Slf4j
 public class CoachController {
 
@@ -34,7 +34,7 @@ public class CoachController {
      * 按城市查询已审教练
      */
     @GetMapping("/list")
-    @ApiOperation("按城市查询已审教练")
+    @Operation(summary = "按城市查询已审教练")
     public Result<PageResult> list(String cityCode, int page, int pageSize) {
         log.info("按城市查询已审教练：cityCode={}, page={}, pageSize={}", cityCode, page, pageSize);
         PageResult pageResult = coachService.listByCity(cityCode, page, pageSize);
@@ -45,7 +45,7 @@ public class CoachController {
      * 根据id查询教练(含资质证书)
      */
     @GetMapping("/{id}")
-    @ApiOperation("根据id查询教练")
+    @Operation(summary = "根据id查询教练")
     public Result<CoachVO> getById(@PathVariable Long id) {
         log.info("根据id查询教练：{}", id);
         CoachVO coachVO = coachService.getById(id);
@@ -57,7 +57,7 @@ public class CoachController {
      * 查询教练某日可约排期
      */
     @GetMapping("/{coachId}/schedule")
-    @ApiOperation("查询教练某日可约排期")
+    @Operation(summary = "查询教练某日可约排期")
     public Result<List<CoachScheduleVO>> availableSchedule(@PathVariable Long coachId,
                                                            @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate date) {
         log.info("查询教练可约排期：coachId={}, date={}", coachId, date);

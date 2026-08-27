@@ -12,8 +12,8 @@ import com.sky.result.Result;
 import com.sky.service.EmployeeService;
 import com.sky.utils.JwtUtil;
 import com.sky.vo.EmployeeLoginVO;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -26,7 +26,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/admin/employee")
-@Api(tags = "员工相关接口")
+@Tag(name = "员工相关接口")
 @Slf4j
 public class EmployeeController {
 
@@ -79,7 +79,7 @@ public class EmployeeController {
      * 新增员工
      */
     @PostMapping
-    @ApiOperation("新增员工")  //  添加swagger注解
+    @Operation(summary = "新增员工")  //  添加swagger注解
     public Result save(@RequestBody EmployeeDTO employeeDTO){
         log.info("新增员工：{}", employeeDTO);
         employeeService.save(employeeDTO);
@@ -90,7 +90,7 @@ public class EmployeeController {
      * 分页查询
      */
     @GetMapping("/page")
-    @ApiOperation("员工分页查询")  //  添加swagger注解
+    @Operation(summary = "员工分页查询")  //  添加swagger注解
      public Result<PageResult> Page(EmployeePageQueryDTO employeePageQueryDTO){
         log.info("分页查询：{}", employeePageQueryDTO);
         PageResult result = employeeService.pageQuery(employeePageQueryDTO);
@@ -100,7 +100,7 @@ public class EmployeeController {
      * 启用禁用员工账号
      */
     @PostMapping("/status/{status}")
-    @ApiOperation("启用禁用员工账号")  //  添加swagger注解
+    @Operation(summary = "启用禁用员工账号")  //  添加swagger注解
     public Result<String> status(@PathVariable("status") Integer status, @RequestBody Long id){
         log.info("启用禁用员工账号：{}, {}", status, id);
         employeeService.startOrStop(status, id);
@@ -110,7 +110,7 @@ public class EmployeeController {
      * 根据id查询员工信息
      */
     @GetMapping("/{id}")
-    @ApiOperation("根据id查询员工信息")  //  添加swagger注解
+    @Operation(summary = "根据id查询员工信息")  //  添加swagger注解
     public Result<Employee> get(@PathVariable("id") Long id){
         log.info("根据id查询员工信息：{}", id);
         Employee employee = employeeService.getById(id);
@@ -120,7 +120,7 @@ public class EmployeeController {
      * 更新员工信息
      */
     @PutMapping
-    @ApiOperation("更新员工信息")  //  添加swagger注解
+    @Operation(summary = "更新员工信息")  //  添加swagger注解
     public Result update(@RequestBody EmployeeDTO employeeDTO){
         log.info("更新员工信息：{}", employeeDTO);
         employeeService.update(employeeDTO);
@@ -133,7 +133,7 @@ public class EmployeeController {
      * @return
      */
     @PutMapping("/editPassword")
-    @ApiOperation("员工修改密码")  //  添加swagger注解
+    @Operation(summary = "员工修改密码")  //  添加swagger注解
     public Result updatePassword(@RequestBody PasswordEditDTO passwordEditDTO){
         log.info("员工修改密码：{}", passwordEditDTO);
         employeeService.editPassword(passwordEditDTO);

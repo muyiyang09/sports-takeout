@@ -6,7 +6,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.1.4-0f0f0f?logo=langchain)](https://langchain-ai.github.io/langgraph/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.3-brightgreen.svg)](https://spring.io/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.16-brightgreen.svg)](https://spring.io/)
 [![Vue](https://img.shields.io/badge/Vue-3.x-green.svg)](https://vuejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688)](https://fastapi.tiangolo.com/)
 [![Non-Commercial](https://img.shields.io/badge/Non--Commercial-License-red.svg)](#许可证-license)
@@ -119,7 +119,7 @@ OCR + 数据库比对 + HITL 人工确认的教练资质审核流程。
 
 - Docker & Docker Compose
 - Python 3.11+
-- JDK 8+
+- JDK 21+
 - Node.js 18+
 
 ### 一键部署（推荐）
@@ -248,7 +248,7 @@ sports-takeout/
 
 | 技术 | 版本 | 用途 |
 |------|------|------|
-| Spring Boot | 2.7.3 | 主后端框架 |
+| Spring Boot | 3.5.16 | 主后端框架 |
 | MyBatis | 2.3.1 | ORM |
 | MySQL | 8.0 | 业务数据库 |
 | Redis | 7 | 缓存/分布式锁 |
@@ -464,7 +464,7 @@ stateDiagram-v2
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.1.4-0f0f0f?logo=langchain)](https://langchain-ai.github.io/langgraph/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.3-brightgreen.svg)](https://spring.io/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.16-brightgreen.svg)](https://spring.io/)
 [![Vue](https://img.shields.io/badge/Vue-3.x-green.svg)](https://vuejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688)](https://fastapi.tiangolo.com/)
 [![Non-Commercial](https://img.shields.io/badge/Non--Commercial-License-red.svg)](#license)
@@ -574,7 +574,7 @@ Unified entry point that routes user requests to the appropriate sub-agent with 
 
 - Docker & Docker Compose
 - Python 3.11+
-- JDK 8+
+- JDK 21+
 - Node.js 18+
 
 ### One-Command Deployment (Recommended)
@@ -703,7 +703,7 @@ sports-takeout/
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
-| Spring Boot | 2.7.3 | Main backend framework |
+| Spring Boot | 3.5.16 | Main backend framework |
 | MyBatis | 2.3.1 | ORM |
 | MySQL | 8.0 | Business database |
 | Redis | 7 | Cache / distributed lock |

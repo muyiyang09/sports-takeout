@@ -4,8 +4,8 @@ import com.sky.dto.OrderReviewDTO;
 import com.sky.result.Result;
 import com.sky.service.OrderReviewService;
 import com.sky.vo.OrderReviewVO;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
  */
 @RestController("userOrderReviewController")
 @RequestMapping("/user/order/review")
-@Api(tags = "C端-订单评价接口")
+@Tag(name = "C端-订单评价接口")
 @Slf4j
 public class OrderReviewController {
 
@@ -26,7 +26,7 @@ public class OrderReviewController {
      * 提交评价
      */
     @PostMapping
-    @ApiOperation("提交评价")
+    @Operation(summary = "提交评价")
     public Result submit(@RequestBody OrderReviewDTO orderReviewDTO) {
         log.info("提交评价：{}", orderReviewDTO);
         orderReviewService.submit(orderReviewDTO);
@@ -37,7 +37,7 @@ public class OrderReviewController {
      * 根据订单id查询评价
      */
     @GetMapping("/{orderId}")
-    @ApiOperation("根据订单id查询评价")
+    @Operation(summary = "根据订单id查询评价")
     public Result<OrderReviewVO> getByOrderId(@PathVariable Long orderId) {
         log.info("根据订单id查询评价：{}", orderId);
         OrderReviewVO orderReviewVO = orderReviewService.getByOrderId(orderId);

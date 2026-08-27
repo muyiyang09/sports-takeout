@@ -1,8 +1,8 @@
 package com.sky.controller.coach;
 
 import com.sky.result.Result;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,14 +18,14 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/coach/common")
 @Slf4j
-@Api(tags = "教练端通用接口")
+@Tag(name = "教练端通用接口")
 public class CoachCommonController {
 
     /**
      * 头像/图片上传，返回可访问的相对路径
      */
     @PostMapping("/upload")
-    @ApiOperation("图片上传")
+    @Operation(summary = "图片上传")
     public Result<String> upload(MultipartFile file) {
         try {
             String original = file.getOriginalFilename();

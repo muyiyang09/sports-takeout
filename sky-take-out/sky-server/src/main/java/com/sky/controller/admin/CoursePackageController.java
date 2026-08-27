@@ -6,8 +6,8 @@ import com.sky.result.PageResult;
 import com.sky.result.Result;
 import com.sky.service.CoursePackageService;
 import com.sky.vo.CoursePackageVO;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
@@ -17,7 +17,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/admin/course_package")
-@Api(tags = "训练套餐相关接口")
+@Tag(name = "训练套餐相关接口")
 @Slf4j
 public class CoursePackageController {
 
@@ -30,7 +30,7 @@ public class CoursePackageController {
      * @return
      */
     @PostMapping
-    @ApiOperation("新增套餐")
+    @Operation(summary = "新增套餐")
     @CacheEvict(cacheNames = "coursePackageCache", key = "#coursePackageDTO.categoryId")
     public Result save(@RequestBody CoursePackageDTO coursePackageDTO) {
         log.info("新增套餐：{}", coursePackageDTO);
@@ -44,7 +44,7 @@ public class CoursePackageController {
      * @return
      */
     @GetMapping("/page")
-    @ApiOperation("分页查询")
+    @Operation(summary = "分页查询")
     public Result<PageResult> page(CoursePackagePageQueryDTO coursePackagePageQueryDTO) {
         log.info("套餐分页查询：{}", coursePackagePageQueryDTO);
         PageResult pageResult = coursePackageService.pageQuery(coursePackagePageQueryDTO);
@@ -57,7 +57,7 @@ public class CoursePackageController {
      * @return
      */
     @DeleteMapping
-    @ApiOperation("批量删除套餐")
+    @Operation(summary = "批量删除套餐")
     @CacheEvict(cacheNames = "coursePackageCache", allEntries = true)
     public Result delete(@RequestParam List<Long> ids) {
         log.info("批量删除套餐：{}", ids);
@@ -72,7 +72,7 @@ public class CoursePackageController {
      * @return
      */
     @GetMapping("/{id}")
-    @ApiOperation("根据id查询套餐")
+    @Operation(summary = "根据id查询套餐")
     public Result<CoursePackageVO> getById(@PathVariable Long id) {
         log.info("根据id查询套餐：{}", id);
         CoursePackageVO coursePackageVO = coursePackageService.getById(id);
@@ -86,7 +86,7 @@ public class CoursePackageController {
      * @return
      */
     @PutMapping
-    @ApiOperation("修改套餐")
+    @Operation(summary = "修改套餐")
     @CacheEvict(cacheNames = "coursePackageCache", allEntries = true)
     public Result update(@RequestBody CoursePackageDTO coursePackageDTO) {
         log.info("修改套餐：{}", coursePackageDTO);
@@ -101,7 +101,7 @@ public class CoursePackageController {
      * @return
      */
     @PostMapping("/status/{status}")
-    @ApiOperation("套餐起售停售")
+    @Operation(summary = "套餐起售停售")
     @CacheEvict(cacheNames = "coursePackageCache", allEntries = true)
     public Result startOrStop(@PathVariable Integer status, Long id) {
         log.info("套餐起售停售：{}", status);
@@ -115,7 +115,7 @@ public class CoursePackageController {
      * @return
      */
     @GetMapping("/list")
-    @ApiOperation("根据分类id查询套餐")
+    @Operation(summary = "根据分类id查询套餐")
     public Result<List<com.sky.entity.CoursePackage>> list(Long categoryId) {
         List<com.sky.entity.CoursePackage> list = coursePackageService.list(categoryId);
         return Result.success(list);

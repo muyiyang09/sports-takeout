@@ -11,8 +11,8 @@ import com.sky.service.CoachService;
 import com.sky.vo.CoachLoginVO;
 import com.sky.vo.CoachScheduleVO;
 import com.sky.vo.CoachVO;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -26,7 +26,7 @@ import java.util.List;
  */
 @RestController("coachCoachController")
 @RequestMapping("/coach")
-@Api(tags = "教练端教练资料与排期接口")
+@Tag(name = "教练端教练资料与排期接口")
 @Slf4j
 public class CoachController {
 
@@ -39,7 +39,7 @@ public class CoachController {
      * 教练入驻
      */
     @PostMapping("/coach/register")
-    @ApiOperation("教练入驻")
+    @Operation(summary = "教练入驻")
     public Result<Long> register(@RequestBody CoachRegisterDTO coachRegisterDTO) {
         log.info("教练入驻：{}", coachRegisterDTO);
         Long coachId = coachService.register(coachRegisterDTO);
@@ -50,7 +50,7 @@ public class CoachController {
      * 教练登录
      */
     @PostMapping("/coach/login")
-    @ApiOperation("教练登录")
+    @Operation(summary = "教练登录")
     public Result<CoachLoginVO> login(@RequestBody CoachLoginDTO coachLoginDTO) {
         log.info("教练登录：{}", coachLoginDTO);
         CoachLoginVO coachLoginVO = coachService.login(coachLoginDTO);
@@ -61,7 +61,7 @@ public class CoachController {
      * 查询我的资料(coachId 从 BaseContext 取)
      */
     @GetMapping("/coach")
-    @ApiOperation("查询我的资料")
+    @Operation(summary = "查询我的资料")
     public Result<CoachVO> myProfile() {
         Long coachId = BaseContext.getCurrentId();
         log.info("查询教练资料：coachId={}", coachId);
@@ -73,7 +73,7 @@ public class CoachController {
      * 更新我的资料(仅可编辑字段)
      */
     @PutMapping("/coach")
-    @ApiOperation("更新我的资料")
+    @Operation(summary = "更新我的资料")
     public Result updateProfile(@RequestBody Coach coach) {
         coach.setId(BaseContext.getCurrentId());
         log.info("更新教练资料：coachId={}", coach.getId());
@@ -85,7 +85,7 @@ public class CoachController {
      * 生成排期(coachId 以登录教练为准)
      */
     @PostMapping("/schedule/generate")
-    @ApiOperation("生成排期")
+    @Operation(summary = "生成排期")
     public Result generateSchedule(@RequestBody CoachScheduleGenerateDTO dto) {
         log.info("生成排期：{}", dto);
         dto.setCoachId(BaseContext.getCurrentId());
@@ -97,7 +97,7 @@ public class CoachController {
      * 查询我的排期(按日期区间)
      */
     @GetMapping("/schedule")
-    @ApiOperation("查询我的排期")
+    @Operation(summary = "查询我的排期")
     public Result<List<CoachScheduleVO>> mySchedule(
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate) {

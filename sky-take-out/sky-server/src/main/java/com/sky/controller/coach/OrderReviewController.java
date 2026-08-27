@@ -4,8 +4,8 @@ import com.sky.context.BaseContext;
 import com.sky.result.PageResult;
 import com.sky.result.Result;
 import com.sky.service.OrderReviewService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController("coachOrderReviewController")
 @RequestMapping("/coach/review")
-@Api(tags = "教练端评价查看接口")
+@Tag(name = "教练端评价查看接口")
 @Slf4j
 public class OrderReviewController {
 
@@ -28,7 +28,7 @@ public class OrderReviewController {
      * 分页查询当前教练收到的评价
      */
     @GetMapping("/page")
-    @ApiOperation("分页查询当前教练收到的评价")
+    @Operation(summary = "分页查询当前教练收到的评价")
     public Result<PageResult> page(int page, int pageSize) {
         Long coachId = BaseContext.getCurrentId();
         log.info("教练查询评价：coachId={}, page={}, pageSize={}", coachId, page, pageSize);

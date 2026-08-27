@@ -3,8 +3,8 @@ package com.sky.controller.user;
 import com.sky.result.Result;
 import com.sky.service.CourseService;
 import com.sky.vo.CourseVO;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 @RestController("userCourseController")
 @RequestMapping("/user/course")
 @Slf4j
-@Api(tags = "C端-课程浏览接口")
+@Tag(name = "C端-课程浏览接口")
 public class CourseController {
     @Autowired
     private RedisTemplate<Object, Object> redisTemplate;
@@ -34,7 +34,7 @@ public class CourseController {
      * </p>
      */
     @GetMapping("/list")
-    @ApiOperation("根据分类id查询课程")
+    @Operation(summary = "根据分类id查询课程")
     public Result<List<CourseVO>> list(Long categoryId) {
         final String key = "course_" + categoryId;
 

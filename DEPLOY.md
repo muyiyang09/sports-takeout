@@ -55,7 +55,7 @@ docker-compose down -v
 ## 二、本地开发部署（不用 Docker）
 
 ### 前置条件
-- JDK 8
+- JDK 21
 - Maven 3.6+
 - MySQL 8.0
 - Redis 7+

@@ -7,8 +7,8 @@ import com.sky.result.PageResult;
 import com.sky.result.Result;
 import com.sky.service.CoachService;
 import com.sky.vo.CoachVO;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.*;
  */
 @RestController("adminCoachController")
 @RequestMapping("/admin/coach")
-@Api(tags = "管理端教练相关接口")
+@Tag(name = "管理端教练相关接口")
 @Slf4j
 public class CoachController {
 
@@ -29,7 +29,7 @@ public class CoachController {
      * 教练分页查询
      */
     @GetMapping("/page")
-    @ApiOperation("教练分页查询")
+    @Operation(summary = "教练分页查询")
     public Result<PageResult> page(CoachPageQueryDTO coachPageQueryDTO) {
         log.info("教练分页查询：{}", coachPageQueryDTO);
         PageResult pageResult = coachService.pageQuery(coachPageQueryDTO);
@@ -40,7 +40,7 @@ public class CoachController {
      * 根据id查询教练(含资质证书)
      */
     @GetMapping("/{id}")
-    @ApiOperation("根据id查询教练")
+    @Operation(summary = "根据id查询教练")
     public Result<CoachVO> getById(@PathVariable Long id) {
         log.info("根据id查询教练：{}", id);
         CoachVO coachVO = coachService.getById(id);
@@ -51,7 +51,7 @@ public class CoachController {
      * 审核教练(通过/驳回)
      */
     @PostMapping("/audit")
-    @ApiOperation("审核教练")
+    @Operation(summary = "审核教练")
     public Result audit(@RequestBody CoachAuditDTO coachAuditDTO) {
         log.info("审核教练：{}", coachAuditDTO);
         coachAuditDTO.setAuditUser(BaseContext.getCurrentId());
@@ -63,7 +63,7 @@ public class CoachController {
      * 审核教练资质证书
      */
     @PostMapping("/cert/audit")
-    @ApiOperation("审核教练资质证书")
+    @Operation(summary = "审核教练资质证书")
     public Result auditCertificate(Long certId, Integer status, String rejectReason) {
         log.info("审核教练资质证书：certId={}, status={}, rejectReason={}", certId, status, rejectReason);
         coachService.auditCertificate(certId, status, rejectReason, BaseContext.getCurrentId());

@@ -6,8 +6,8 @@ import com.sky.result.PageResult;
 import com.sky.result.Result;
 import com.sky.service.CourseService;
 import com.sky.vo.CourseVO;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -19,7 +19,7 @@ import java.util.Set;
 @RestController
 @RequestMapping("/admin/course")
 @Slf4j
-@Api(tags = "课程相关接口")
+@Tag(name = "课程相关接口")
 public class CourseController {
     @Autowired
     private RedisTemplate redisTemplate;
@@ -30,7 +30,7 @@ public class CourseController {
      * 新增课程
      */
     @PostMapping
-    @ApiOperation("新增课程")
+    @Operation(summary = "新增课程")
     public Result save(@RequestBody CourseDTO courseDTO) {
         log.info("新增课程：{}", courseDTO);
         courseService.save(courseDTO);
@@ -44,7 +44,7 @@ public class CourseController {
      * 课程分页查询
      */
     @GetMapping("/page")
-    @ApiOperation("课程分页查询")
+    @Operation(summary = "课程分页查询")
     public Result<PageResult> page(CoursePageQueryDTO coursePageQueryDTO) {
         log.info("课程分页查询：{}", coursePageQueryDTO);
         PageResult pageResult = courseService.pageQuery(coursePageQueryDTO);
@@ -55,7 +55,7 @@ public class CourseController {
      * 批量删除课程
      */
     @DeleteMapping
-    @ApiOperation("课程批量删除")
+    @Operation(summary = "课程批量删除")
     public Result delete(@RequestParam List<Long> ids) {
         log.info("课程批量删除：{}", ids);
         courseService.deleteBatch(ids);
@@ -68,7 +68,7 @@ public class CourseController {
      * 根据ID查询课程
      */
     @GetMapping("/{id}")
-    @ApiOperation("根据id查询课程")
+    @Operation(summary = "根据id查询课程")
     public Result<CourseVO> getById(@PathVariable Long id) {
         log.info("根据ID查询课程：{}", id);
         CourseVO courseVO = courseService.getById(id);
@@ -79,7 +79,7 @@ public class CourseController {
      * 修改课程
      */
     @PutMapping
-    @ApiOperation("修改课程")
+    @Operation(summary = "修改课程")
     public Result update(@RequestBody CourseDTO courseDTO) {
         log.info("修改课程：{}", courseDTO);
         courseService.update(courseDTO);
@@ -95,7 +95,7 @@ public class CourseController {
      * @return
      */
     @PostMapping("/status/{status}")
-    @ApiOperation("课程起售停售")
+    @Operation(summary = "课程起售停售")
     public Result<String> startOrStop(@PathVariable Integer status, Long id) {
         log.info("课程起售停售：{}", status);
         courseService.startOrStop(status, id);
@@ -110,7 +110,7 @@ public class CourseController {
      * @return
      */
     @GetMapping("/list")
-    @ApiOperation("根据分类id查询课程")
+    @Operation(summary = "根据分类id查询课程")
     public Result<List<CourseVO>> list(Long categoryId) {
         List<CourseVO> list = courseService.list(categoryId);
         return Result.success(list);
