@@ -13,7 +13,7 @@ import java.util.Map;
 public class JwtUtil {
     /**
      * 生成jwt
-     * 使用 HS256 算法, 私钥使用固定秘钥
+     * 使用 HMAC-SHA 算法签名（HS256/HS384/HS512，由密钥长度决定）
      *
      * @param secretKey jwt秘钥
      * @param ttlMillis jwt过期时间(毫秒)
@@ -29,7 +29,7 @@ public class JwtUtil {
         return Jwts.builder()
                 // 如果有私有声明，一定要先设置自己创建的私有声明，否则会覆盖标准声明
                 .claims(claims)
-                // 使用 HS256 + 派生出的密钥签名
+                // 使用派生出的 HMAC 密钥签名
                 .signWith(getSigningKey(secretKey))
                 // 设置过期时间
                 .expiration(exp)
@@ -55,9 +55,8 @@ public class JwtUtil {
 
     /**
      * 由配置的字符串密钥派生出 HMAC 密钥。
-     * jjwt 0.12 起要求 HS256 密钥长度 >= 256 bit(32 字节)，
-     * 而配置里的旧密钥较短(如 "itcast"、"itheima")，这里补零到 32 字节以保持兼容。
-     * 建议后续把 application.yml 里的 jwt 密钥改成 >= 32 位的随机字符串。
+     * jjwt 0.12 起要求 HMAC 密钥长度 >= 256 bit(32 字节)；当前配置密钥已为
+     * 64 位随机串，无需处理。这里对 <32 字节的短密钥补零到 32 字节，仅作防御性兜底。
      */
     private static SecretKey getSigningKey(String secretKey) {
         byte[] bytes = secretKey.getBytes(StandardCharsets.UTF_8);

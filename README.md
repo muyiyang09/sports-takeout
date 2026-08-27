@@ -249,7 +249,7 @@ sports-takeout/
 | 技术 | 版本 | 用途 |
 |------|------|------|
 | Spring Boot | 3.5.16 | 主后端框架 |
-| MyBatis | 2.3.1 | ORM |
+| MyBatis | 3.0.4 | ORM |
 | MySQL | 8.0 | 业务数据库 |
 | Redis | 7 | 缓存/分布式锁 |
 | JWT | - | 三端鉴权隔离 |
@@ -704,7 +704,7 @@ sports-takeout/
 | Technology | Version | Purpose |
 |------------|---------|---------|
 | Spring Boot | 3.5.16 | Main backend framework |
-| MyBatis | 2.3.1 | ORM |
+| MyBatis | 3.0.4 | ORM |
 | MySQL | 8.0 | Business database |
 | Redis | 7 | Cache / distributed lock |
 | JWT | - | Three-end auth isolation |

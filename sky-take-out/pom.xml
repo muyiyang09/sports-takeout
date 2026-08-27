@@ -21,7 +21,7 @@
         <java.version>21</java.version>
         <mybatis.spring>3.0.4</mybatis.spring>
         <lombok>1.18.34</lombok>
-        <fastjson>1.2.83</fastjson>
+        <fastjson2>2.0.64</fastjson2>
         <commons.lang>2.6</commons.lang>
         <druid>1.2.24</druid>
         <pagehelper>2.1.0</pagehelper>
@@ -46,9 +46,9 @@
             </dependency>
 
             <dependency>
-                <groupId>com.alibaba</groupId>
-                <artifactId>fastjson</artifactId>
-                <version>${fastjson}</version>
+                <groupId>com.alibaba.fastjson2</groupId>
+                <artifactId>fastjson2</artifactId>
+                <version>${fastjson2}</version>
             </dependency>
 
             <dependency>

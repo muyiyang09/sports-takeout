@@ -1,7 +1,7 @@
 # 体育外卖 · 上门私教平台 — 产品需求文档（PRD）
 
 > 版本 v0.2（最终 MVP 边界确认） · 2026-08-23
-> 底座：苍穹外卖 sky-take-out（Spring Boot 2.7.3 单体 + MyBatis + MySQL + Redis + 微信小程序）
+> 底座：苍穹外卖 sky-take-out（Spring Boot 3.5.16 单体 + MyBatis + MySQL + Redis + 微信小程序）
 > v0.2 变更：明确 MVP 做/不做边界、新增订单状态机图、合并派单/抢单池为单表、CourseSpec 规格字段并入 Course
 
 ---
@@ -171,7 +171,7 @@
 
 ## 7. 技术栈与底座
 
-- 后端：Spring Boot 2.7.3（继承苍穹外卖）、MyBatis、MySQL、Redis、JWT、Knife4j、PageHelper、阿里云 OSS
+- 后端：Spring Boot 3.5.16（继承苍穹外卖）、MyBatis、MySQL、Redis、JWT、Knife4j、PageHelper、阿里云 OSS
 - 前端：uniapp 微信小程序（用户端改造 + 教练端新建）、PC 管理端（继承苍穹外卖 admin，Vue + ElementUI 风格）
 - 支付：MVP 阶段 **模拟支付**，二期接微信支付
 - 地图：MVP 用地址文本，二期接高德/百度定位导航

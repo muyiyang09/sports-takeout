@@ -46,16 +46,16 @@ logging:
 sky:
   jwt:
     # 设置jwt签名加密时使用的秘钥
-    admin-secret-key: itcast
+    admin-secret-key: dc3f6fb16b4fe31ff1e0910f67be2b108de44cd4ea55b76775d5a7b72ebe5409
     # 设置jwt过期时间
     admin-ttl: 7200000
     # 设置前端传递过来的令牌名称
     admin-token-name: token
-    user-secret-key: itheima
+    user-secret-key: 89bac629749f27df08330116c1b562f64835be18528cb708f4a9c3bd7b99c62a
     user-ttl: 7200000
     user-token-name: authentication
     # 教练端
-    coach-secret-key: itcast
+    coach-secret-key: 2ccc1f422dccd7882cd6512a6d9dc7d6b1ec4f7f626715cb803d702409fb2f9c
     coach-ttl: 7200000
     coach-token-name: token
   encrypt:
