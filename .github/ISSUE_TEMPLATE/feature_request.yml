@@ -1,0 +1,28 @@
+name: 💡 功能建议 / Feature Request
+description: 提出新功能或改进建议（Suggest an idea）
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决什么问题 / What problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: 建议的方案 / Proposed solution
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 涉及范围 / Scope
+      options:
+        - label: AI 微服务（Agent/RAG/评测）
+        - label: 业务后端（订单/派单/认证）
+        - label: 前端 / 小程序
+        - label: 文档
+  - type: markdown
+    attributes:
+      value: 注意：本项目许可证为非商业许可，请勿提出涉及商业集成的需求。

@@ -1,0 +1,45 @@
+name: 🐛 Bug 报告 / Bug Report
+description: 报告项目运行中的问题（Report a problem）
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: 感谢反馈！请先搜索已有 issue 避免重复。Thanks for reporting! Please search existing issues first.
+  - type: dropdown
+    id: module
+    attributes:
+      label: 涉及模块 / Module
+      options:
+        - 后端 sky-take-out (Spring Boot)
+        - AI 微服务 ai-service (FastAPI/LangGraph)
+        - 管理端 admin-web (Vue3)
+        - 小程序 uniapp-user / uniapp-coach
+        - 部署 docker-compose
+        - 其他 Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      placeholder: |
+        1. 启动 ...
+        2. 访问 ...
+        3. 出现 ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为与实际行为 / Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 关键日志或截图 / Logs or screenshots
+  - type: input
+    id: env
+    attributes:
+      label: 环境 / Environment
+      placeholder: "OS, Docker version, JDK 21, node version ..."

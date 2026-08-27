@@ -9,6 +9,7 @@
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.16-brightgreen.svg)](https://spring.io/)
 [![Vue](https://img.shields.io/badge/Vue-3.x-green.svg)](https://vuejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688)](https://fastapi.tiangolo.com/)
+[![GitHub Stars](https://img.shields.io/github/stars/muyiyang09/sports-takeout?style=social)](https://github.com/muyiyang09/sports-takeout/stargazers)
 [![Non-Commercial](https://img.shields.io/badge/Non--Commercial-License-red.svg)](#许可证-license)
 
 [中文](#项目介绍) | [English](#english)
@@ -22,6 +23,27 @@
 **体育外卖**（Sports Takeout）是一个面向上门私教 O2O 场景的智能服务平台，核心定位是"**把健身房搬到家里**"——教练携带便携器械上门，为用户提供科学的减脂、增肌、拉伸、产后恢复等一对一训练服务。
 
 本项目在传统 O2O 业务系统之上，构建了一套独立的 **AI 微服务**（`ai-service`），基于 LangGraph Agent 框架，实现教练智能推荐、课程评价摘要、教练资质智能审核等 AI 能力，打造"业务系统 + AI 智能体"的双引擎架构。
+
+> 🇨🇳 项目动机源自《全民健身计划（2026—2030）》提出的科学健身指导供给缺口——政策文件里 "每千人 3.3 名社会体育指导员" 的目标，正是本平台要用数字化手段补上的空缺。
+
+## 🎯 为什么值得你花 15 分钟
+
+这不是一个 CRUD Demo。**LangGraph Agent 工程化中所有真正难的点——多 Agent 协作、HITL 人工介入、Checkpointer 状态持久化、混合检索 RAG、缓存穿透/击穿/雪崩三防、跨语言 MCP 工具层——都在这个仓库里被真实落地过一遍**，并且每一条都配有可运行代码和踩坑记录。
+
+如果你正在准备 AI 工程化方向的面试或做技术选型，直接按表索骥：
+
+| 你关心的主题 | 直接看这几篇 |
+|---|---|
+| 多 Agent 协作 & Supervisor 路由降级 | [08-多Agent实现](ai-service/docs/08-多Agent实现.md) |
+| 混合检索 RAG（BM25 + 向量 + RRF 调参） | [04-RAG混合检索](ai-service/docs/04-RAG混合检索.md) |
+| 循环工程 / HITL / Checkpointer / RedisSaver | [03-循环工程](ai-service/docs/03-循环工程.md) · [10-上线检查清单](ai-service/docs/10-上线检查清单.md) |
+| 缓存三防 / 分布式锁防死锁 / 熔断限流 | [05-商业化加固](ai-service/docs/05-商业化加固.md) |
+| MCP 跨语言工具层 | [07-MCP工具层](ai-service/docs/07-MCP工具层.md) |
+| ⭐ **Agent 高频面试题（40+ 题 + 场景面经 + 速记话术）** | [09-Agent面试题集](ai-service/docs/09-Agent面试题集.md) · [11-Agent场景面经](ai-service/docs/11-Agent场景面经.md) · [12-面试速记话术](ai-service/docs/12-面试速记话术.md) |
+
+![用户端首页](docs/screenshots/user-home.png)
+
+如果对你有帮助，右上角点个 **⭐ Star** 让更多 AI 学习者看到这份资料。这是它持续更新的最大动力。
 
 ## 核心亮点
 
@@ -53,7 +75,7 @@ flowchart TB
     subgraph 存储
         MySQL[(MySQL 8.0)]
         Redis[(Redis 7)]
-        Vector[(Chroma / pgvector)]
+        Vec[(Milvus / Chroma / pgvector)]
     end
 
     subgraph AI Agents
@@ -83,7 +105,7 @@ flowchart TB
     A4 --> A3
 
     A1 --> RAG 层
-    RAG 层 --> Vector
+    RAG 层 --> Vec
     A1 --> MySQL
     A2 --> MySQL
     A3 --> MySQL
@@ -494,7 +516,25 @@ stateDiagram-v2
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.16-brightgreen.svg)](https://spring.io/)
 [![Vue](https://img.shields.io/badge/Vue-3.x-green.svg)](https://vuejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688)](https://fastapi.tiangolo.com/)
+[![GitHub Stars](https://img.shields.io/github/stars/muyiyang09/sports-takeout?style=social)](https://github.com/muyiyang09/sports-takeout/stargazers)
 [![Non-Commercial](https://img.shields.io/badge/Non--Commercial-License-red.svg)](#license)
+
+## ⭐ Why This Repo Is Worth Your Time
+
+This is not another CRUD demo. **Every genuinely hard part of LangGraph agent engineering — multi-agent collaboration, HITL, Checkpointer state persistence, hybrid-retrieval RAG, cache penetration/collapse/avalanche protection, cross-language MCP tool layer — has been implemented for real in this codebase**, each with runnable code and battle-tested lessons.
+
+Preparing for AI engineering interviews or doing tech selection? Go straight to what you need:
+
+| Topic | Read |
+|---|---|
+| Multi-Agent & Supervisor routing | [Multi-Agent Implementation](ai-service/docs/08-多Agent实现.md) |
+| Hybrid RAG (BM25 + Vector + RRF tuning) | [Hybrid Retrieval](ai-service/docs/04-RAG混合检索.md) |
+| Loop engineering / HITL / RedisSaver | [Loop Engineering](ai-service/docs/03-循环工程.md) · [Launch Checklist](ai-service/docs/10-上线检查清单.md) |
+| Cache protection / distributed locks / circuit breaking | [Production Hardening](ai-service/docs/05-商业化加固.md) |
+| MCP cross-language tool layer | [MCP Tool Layer](ai-service/docs/07-MCP工具层.md) |
+| **40+ AI Agent interview questions with answers** | [Interview Q&A](ai-service/docs/09-Agent面试题集.md) · [Scenario Questions](ai-service/docs/11-Agent场景面经.md) |
+
+If this repo helps you, please give it a **⭐ Star** — it keeps the project alive.
 
 [Back to Top](#体育外卖--ai-智能体平台)
 
@@ -534,7 +574,7 @@ flowchart TB
     subgraph Storage
         MySQL[(MySQL 8.0)]
         Redis[(Redis 7)]
-        Vector[(Chroma / pgvector)]
+        Vec[(Milvus / Chroma / pgvector)]
     end
 
     subgraph AI Agents
@@ -564,7 +604,7 @@ flowchart TB
     A4 --> A3
 
     A1 --> RAG Layer
-    RAG Layer --> Vector
+    RAG Layer --> Vec
     A1 --> MySQL
     A2 --> MySQL
     A3 --> MySQL
@@ -947,3 +987,7 @@ This project is licensed under **AGPL-3.0 + Non-Commercial Additional Terms**. *
 | ✅ Open-source community contributions | ❌ Resale or sublicensing |
 
 See the full [LICENSE](LICENSE) file for details. For collaboration or special licensing, please contact the project maintainers.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=muyiyang09/sports-takeout&type=Date)](https://star-history.com/#muyiyang09/sports-takeout&Date)
