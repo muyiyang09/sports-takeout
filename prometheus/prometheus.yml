@@ -1,0 +1,16 @@
+# Prometheus 采集配置（§5.27）
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # 后端 Spring Boot（micrometer-registry-prometheus）
+  - job_name: 'backend'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['backend:8080']
+
+  # AI 微服务（/metrics 端点）
+  - job_name: 'ai-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['ai-service:18000']

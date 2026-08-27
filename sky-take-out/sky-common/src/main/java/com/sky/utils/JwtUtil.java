@@ -9,31 +9,52 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.Map;
+import java.util.UUID;
 
 public class JwtUtil {
+
+    public static class JwtTokenResult {
+        private final String token;
+        private final String jti;
+
+        public JwtTokenResult(String token, String jti) {
+            this.token = token;
+            this.jti = jti;
+        }
+
+        public String getToken() {
+            return token;
+        }
+
+        public String getJti() {
+            return jti;
+        }
+    }
+
     /**
      * 生成jwt
      * 使用 HMAC-SHA 算法签名（HS256/HS384/HS512，由密钥长度决定）
+     * 自动生成 jti (UUID) 并写入 claims，返回包含 token 和 jti 的结果对象
      *
      * @param secretKey jwt秘钥
      * @param ttlMillis jwt过期时间(毫秒)
      * @param claims    设置的信息
-     * @return
+     * @return JwtTokenResult 包含 token 和 jti
      */
-    public static String createJWT(String secretKey, long ttlMillis, Map<String, Object> claims) {
-        // 生成JWT的时间
+    public static JwtTokenResult createJWT(String secretKey, long ttlMillis, Map<String, Object> claims) {
+        String jti = UUID.randomUUID().toString();
+        claims.put("jti", jti);
+
         long expMillis = System.currentTimeMillis() + ttlMillis;
         Date exp = new Date(expMillis);
 
-        // 设置jwt的body并签名
-        return Jwts.builder()
-                // 如果有私有声明，一定要先设置自己创建的私有声明，否则会覆盖标准声明
+        String token = Jwts.builder()
                 .claims(claims)
-                // 使用派生出的 HMAC 密钥签名
                 .signWith(getSigningKey(secretKey))
-                // 设置过期时间
                 .expiration(exp)
                 .compact();
+
+        return new JwtTokenResult(token, jti);
     }
 
     /**

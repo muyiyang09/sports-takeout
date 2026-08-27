@@ -1,0 +1,18 @@
+# Alertmanager 配置（§6.32）
+# 路由 Prometheus 告警到钉钉/飞书 webhook（需替换实际 webhook URL）
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default'
+
+receivers:
+  - name: 'default'
+    webhook_configs:
+      # 钉钉/飞书 webhook（生产替换为实际地址）
+      - url: 'http://dingtalk-webhook:8060/dingtalk/ops/send'
+        send_resolved: true

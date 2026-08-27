@@ -1,6 +1,9 @@
 package com.sky.controller.coach;
 
+import com.sky.context.BaseContext;
 import com.sky.dto.ServiceCompleteDTO;
+import com.sky.entity.Orders;
+import com.sky.exception.OrderBusinessException;
 import com.sky.result.PageResult;
 import com.sky.result.Result;
 import com.sky.service.DispatchPoolService;
@@ -34,7 +37,8 @@ public class OrderController {
      */
     @GetMapping("/list")
     @Operation(summary = "教练接单列表分页查询")
-    public Result<PageResult> list(int page, int pageSize, Integer status, Long coachId) {
+    public Result<PageResult> list(int page, int pageSize, Integer status) {
+        Long coachId = BaseContext.getCurrentId();
         PageResult pageResult = orderService.pageQuery4Coach(page, pageSize, status, coachId);
         return Result.success(pageResult);
     }
@@ -44,7 +48,8 @@ public class OrderController {
      */
     @PutMapping("/confirm")
     @Operation(summary = "教练确认接单(指定单)")
-    public Result confirm(Long id, Long coachId) {
+    public Result confirm(Long id) {
+        Long coachId = BaseContext.getCurrentId();
         orderService.confirmOrder(id, coachId);
         return Result.success();
     }
@@ -54,7 +59,8 @@ public class OrderController {
      */
     @PutMapping("/reject")
     @Operation(summary = "教练拒单(指定单)")
-    public Result reject(Long id, Long coachId, String reason) {
+    public Result reject(Long id, String reason) {
+        Long coachId = BaseContext.getCurrentId();
         orderService.rejectOrder(id, coachId, reason);
         return Result.success();
     }
@@ -64,7 +70,8 @@ public class OrderController {
      */
     @PostMapping("/seize")
     @Operation(summary = "派单池抢单")
-    public Result seize(Long poolId, Long coachId) {
+    public Result seize(Long poolId) {
+        Long coachId = BaseContext.getCurrentId();
         orderService.seize(poolId, coachId);
         return Result.success();
     }
@@ -74,7 +81,8 @@ public class OrderController {
      */
     @PutMapping("/startService")
     @Operation(summary = "开始服务")
-    public Result startService(Long id, Long coachId) {
+    public Result startService(Long id) {
+        Long coachId = BaseContext.getCurrentId();
         orderService.startService(id, coachId);
         return Result.success();
     }
@@ -105,6 +113,10 @@ public class OrderController {
     @GetMapping("/details/{id}")
     @Operation(summary = "查询订单详情")
     public Result<OrderVO> details(@PathVariable("id") Long id) {
+        Orders order = orderService.getById(id);
+        if (order == null || !order.getCoachId().equals(BaseContext.getCurrentId())) {
+            throw new OrderBusinessException("无权查看该订单");
+        }
         OrderVO orderVO = orderService.details(id);
         return Result.success(orderVO);
     }

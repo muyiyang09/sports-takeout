@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.db
+*.sqlite3
+
+# 本机密钥（真实密钥一律不要提交）
+.env
+.env.local
+
+# 依赖锁定产物（可选，见 docs 讨论）
+# uv.lock / poetry.lock 建议提交以复现构建，故不忽略

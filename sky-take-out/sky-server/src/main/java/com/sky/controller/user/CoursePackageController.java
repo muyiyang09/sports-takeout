@@ -32,7 +32,8 @@ public class CoursePackageController {
      */
     @GetMapping("/list")
     @Operation(summary = "根据分类id查询套餐")
-    @Cacheable(cacheNames = "coursePackageCache", key = "#categoryId")
+    // sync=true：并发 miss 时单线程回源，其余等待复用结果（击穿防护）
+    @Cacheable(cacheNames = "coursePackageCache", key = "#categoryId", sync = true)
     public Result<List<CoursePackage>> list(Long categoryId) {
         List<CoursePackage> list = coursePackageService.list(categoryId);
         return Result.success(list);

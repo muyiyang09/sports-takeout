@@ -22,7 +22,7 @@
         <mybatis.spring>3.0.4</mybatis.spring>
         <lombok>1.18.34</lombok>
         <fastjson2>2.0.64</fastjson2>
-        <commons.lang>2.6</commons.lang>
+        <commons.lang3>3.17.0</commons.lang3>
         <druid>1.2.24</druid>
         <pagehelper>2.1.0</pagehelper>
         <aliyun.sdk.oss>3.17.4</aliyun.sdk.oss>
@@ -30,6 +30,7 @@
         <springdoc>2.8.17</springdoc>
         <jjwt>0.12.6</jjwt>
         <poi>5.2.5</poi>
+        <shedlock>6.2.0</shedlock>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -52,9 +53,9 @@
             </dependency>
 
             <dependency>
-                <groupId>commons-lang</groupId>
-                <artifactId>commons-lang</artifactId>
-                <version>${commons.lang}</version>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>${commons.lang3}</version>
             </dependency>
 
             <dependency>
@@ -125,6 +126,17 @@
                 <groupId>com.github.wechatpay-apiv3</groupId>
                 <artifactId>wechatpay-apache-httpclient</artifactId>
                 <version>0.4.8</version>
+            </dependency>
+            <!-- ShedLock 分布式定时任务锁（§6.24 多副本防重复跑） -->
+            <dependency>
+                <groupId>net.javacrumbs.shedlock</groupId>
+                <artifactId>shedlock-spring</artifactId>
+                <version>${shedlock}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.javacrumbs.shedlock</groupId>
+                <artifactId>shedlock-provider-jdbc-template</artifactId>
+                <version>${shedlock}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

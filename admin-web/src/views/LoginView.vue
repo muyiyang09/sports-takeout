@@ -16,12 +16,15 @@
     </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import api, { setToken } from '../api.js';
+import { useRouter } from 'vue-router';
+import api from '../api';
+import { useAuthStore } from '../stores/auth';
 
-const emit = defineEmits(['success']);
+const router = useRouter();
+const auth = useAuthStore();
 
 const username = ref('admin');
 const password = ref('123456');
@@ -38,11 +41,11 @@ async function doLogin() {
             username: username.value,
             password: password.value
         });
-        setToken(data.token);
+        auth.login(data.token);
         ElMessage.success('登录成功');
-        emit('success');
+        router.push('/');
     } catch (e) {
-        ElMessage.error(e.message || '登录失败');
+        ElMessage.error((e as Error).message || '登录失败');
     } finally {
         loading.value = false;
     }

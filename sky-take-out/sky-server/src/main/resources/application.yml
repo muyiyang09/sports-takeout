@@ -1,9 +1,17 @@
 server:
   port: 8080
+  shutdown: graceful          # K8s/滚动更新期间处理完存量请求再退（§6.12）
 
 spring:
   profiles:
     active: dev
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  # 文件上传限制（§19.1）：与 alioss max-size 对齐
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
   main:
     allow-circular-references: true
   datasource:
@@ -43,24 +51,35 @@ logging:
         service: info
         controller: info
 
+# Actuator 探针 + Prometheus 指标导出（§5.11 / §5.27）
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
 sky:
   jwt:
-    # 设置jwt签名加密时使用的秘钥
-    admin-secret-key: dc3f6fb16b4fe31ff1e0910f67be2b108de44cd4ea55b76775d5a7b72ebe5409
+    # JWT 签名密钥：一律从环境变量注入，缺省空值 → 启动失败（§6.14 快速失败）
+    # 开发环境弱默认见 application-dev.yml；生产密钥写入 .env（git 历史视为已泄露，需轮换）
+    admin-secret-key: ${SKY_JWT_ADMIN_KEY:}
     # 设置jwt过期时间
     admin-ttl: 7200000
     # 设置前端传递过来的令牌名称
     admin-token-name: token
-    user-secret-key: 89bac629749f27df08330116c1b562f64835be18528cb708f4a9c3bd7b99c62a
+    user-secret-key: ${SKY_JWT_USER_KEY:}
     user-ttl: 7200000
     user-token-name: authentication
     # 教练端
-    coach-secret-key: 2ccc1f422dccd7882cd6512a6d9dc7d6b1ec4f7f626715cb803d702409fb2f9c
+    coach-secret-key: ${SKY_JWT_COACH_KEY:}
     coach-ttl: 7200000
     coach-token-name: token
   encrypt:
-    # 敏感信息(身份证号等)AES 加密密钥(16/24/32 字节)
-    aes-key: SportsTakeoutKey
+    # 敏感信息(身份证号等)AES 加密密钥(16/24/32 字节)，从环境变量注入
+    aes-key: ${SKY_AES_KEY:}
   alioss:
     endpoint: ${sky.alioss.endpoint}
     access-key-id: ${sky.alioss.access-key-id}

@@ -3,6 +3,7 @@ package com.sky.interceptor;
 import com.sky.constant.JwtClaimsConstant;
 import com.sky.context.BaseContext;
 import com.sky.properties.JwtProperties;
+import com.sky.service.TokenBlacklistService;
 import com.sky.utils.JwtUtil;
 import io.jsonwebtoken.Claims;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +25,9 @@ public class JwtTokenCoachInterceptor implements HandlerInterceptor {
     @Autowired
     private JwtProperties jwtProperties;
 
+    @Autowired
+    private TokenBlacklistService tokenBlacklistService;
+
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         //判断当前拦截到的是Controller的方法还是其他资源
         if (!(handler instanceof HandlerMethod)) {
@@ -35,15 +39,28 @@ public class JwtTokenCoachInterceptor implements HandlerInterceptor {
 
         //2、校验令牌
         try {
-            log.info("教练端 jwt校验:{}", token);
+            log.info("教练端 jwt校验:{}", token == null ? null : token.substring(0, Math.min(6, token.length())) + "***");
             Claims claims = JwtUtil.parseJWT(jwtProperties.getCoachSecretKey(), token);
             Long coachId = Long.valueOf(claims.get(JwtClaimsConstant.COACH_ID).toString());
             log.info("当前教练id：{}", coachId);
+
+            String jti = claims.get(JwtClaimsConstant.JTI) != null
+                    ? claims.get(JwtClaimsConstant.JTI).toString()
+                    : null;
+            if (jti != null && tokenBlacklistService.isBlacklisted(jti)) {
+                log.warn("token已被吊销, coachId={}, jti={}", coachId, jti);
+                response.setStatus(401);
+                return false;
+            }
+
+            if (jti != null) {
+                tokenBlacklistService.registerUserToken(
+                        String.valueOf(coachId), jti, jwtProperties.getCoachTtl());
+            }
+
             BaseContext.setCurrentId(coachId);
-            //3、通过，放行
             return true;
         } catch (Exception ex) {
-            //4、不通过，响应401状态码
             response.setStatus(401);
             return false;
         }

@@ -16,8 +16,6 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
-# Chroma 向量库持久化数据
-ai-service/data/
 # SQLite 临时文件
 *.db
 *.sqlite3

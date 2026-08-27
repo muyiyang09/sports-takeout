@@ -6,6 +6,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.sky.properties.WeChatProperties;
 import com.sky.service.OrderService;
 import com.wechat.pay.contrib.apache.httpclient.util.AesUtil;
+import com.wechat.pay.contrib.apache.httpclient.util.PemUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.entity.ContentType;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,7 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.Signature;
+import java.security.cert.X509Certificate;
+import java.util.Base64;
 import java.util.HashMap;
 
 /**
@@ -36,8 +41,46 @@ public class PayNotifyController {
      */
     @RequestMapping("/paySuccess")
     public void paySuccessNotify(HttpServletRequest request, HttpServletResponse response) throws Exception {
-        //读取数据
+        // 1. 获取微信支付签名相关的请求头
+        String signature = request.getHeader("Wechatpay-Signature");
+        String timestamp = request.getHeader("Wechatpay-Timestamp");
+        String nonce = request.getHeader("Wechatpay-Nonce");
+        String serial = request.getHeader("Wechatpay-Serial");
+
+        // 2. 读取请求体
         String body = readData(request);
+
+        // 3. 验证签名
+        try {
+            X509Certificate certificate = PemUtil.loadCertificate(
+                new FileInputStream(weChatProperties.getWeChatPayCertFilePath()));
+
+            // 验证证书序列号是否匹配
+            String certSerial = certificate.getSerialNumber().toString(16).toUpperCase();
+            if (serial == null || !certSerial.equals(serial.toUpperCase())) {
+                log.error("微信支付回调证书序列号不匹配, 请求序列号: {}, 证书序列号: {}", serial, certSerial);
+                response.setStatus(401);
+                return;
+            }
+
+            // 使用 Java 原生 Signature 验证 RSA 签名
+            String message = timestamp + "\n" + nonce + "\n" + body + "\n";
+            Signature sig = Signature.getInstance("SHA256withRSA");
+            sig.initVerify(certificate.getPublicKey());
+            sig.update(message.getBytes(StandardCharsets.UTF_8));
+            boolean verified = sig.verify(Base64.getDecoder().decode(signature));
+
+            if (!verified) {
+                log.error("微信支付回调验签失败");
+                response.setStatus(401);
+                return;
+            }
+        } catch (Exception e) {
+            log.error("微信支付回调验签异常", e);
+            response.setStatus(500);
+            return;
+        }
+
         log.info("支付成功回调：{}", body);
 
         //数据解密

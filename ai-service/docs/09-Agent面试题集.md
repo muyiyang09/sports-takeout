@@ -12,7 +12,7 @@
 
 | 题集里声称 | 代码实际 | 面试口径 |
 |---|---|---|
-| 向量库选 Chroma / pgvector（Q2.5、Q2.6） | 未部署任何向量库，混合检索只跑 **BM25 单路**（向量/重排依赖未装自动降级） | 「目标选型，当前 BM25」 |
+| 向量库选 Milvus（Q2.5、Q2.6） | 已选型 Milvus 单后端，pymilvus 未装则降级 BM25 单路（向量召回未实际跑） | 「Milvus 单后端，未装则 BM25」 |
 | Cross-Encoder 精排 bge-reranker（Q2.3、Q2.4） | [reranker.py](../app/clients/reranker.py) 默认关 + 依赖未装，no-op | 「当前 5 维规则打分，上千教练再接」 |
 | SafeSplitter / 父子分片（Q2.2） | 无 `app/ingest` 分片管道，是目标设计 | 「目标设计」 |
 | LockRegistry / 画像乐观锁 / 锁排序（Q1.3、Q1.5） | 未落地，三个 Agent 是独立端点无锁场景 | 「用到再建」 |
@@ -1238,7 +1238,7 @@ Query ─┬─ BM25 稀疏召回（关键词精确命中）
 
 - **结构化 SQL 过滤**：city / level / sex / rating 下限 / 预算上限（✅ 已落地）
 - **BM25 召回**：rank_bm25 + jieba 中文分词（✅ 已落地，默认单路）
-- **向量召回**：Chroma + bge-m3（⚠️ 目标设计，依赖未装自动降级）
+- **向量召回**：Milvus + bge-m3（⚠️ 已选型，pymilvus 未装则降级 BM25 单路）
 - **融合**：RRF（k=60）（✅ 已落地，多路时才触发）
 - **Rerank**：bge-reranker-v2-m3（⚠️ 目标设计，默认关 + no-op）
 
@@ -1338,9 +1338,9 @@ A：能但不可持续：
 | 方案 | 部署 | 持久化 | 多副本共享 | 适用数据量 | 本项目选型 |
 |---|---|---|---|---|---|
 | **numpy + 内存** | 进程内 | ❌ | ❌ | < 1 万 | 起步阶段 |
-| **Chroma** | 嵌入式 | ✅ 文件 | ❌ | < 100 万 | 开发用（未部署） |
-| **pgvector** | PostgreSQL 扩展 | ✅ | ✅ | < 1000 万 | **生产首选**（未部署） |
-| **Milvus** | 独立分布式服务 | ✅ | ✅ | > 1 亿 | 大规模 |
+| **Chroma** | 嵌入式 | ✅ 文件 | ❌ | < 100 万 | 不选（多副本不共享） |
+| **pgvector** | PostgreSQL 扩展 | ✅ | ✅ | < 1000 万 | 不选 |
+| **Milvus** | 独立分布式服务 | ✅ | ✅ | > 1 亿 | **本项目选型** |
 | **Faiss** | 进程内库 | ⚠️ 手动 | ❌ | 任意 | 性能极致 |
 | **Qdrant** | Rust，可嵌入可独立 | ✅ | ✅ | < 1 亿 | 性能 + 运维 |
 
@@ -1353,7 +1353,7 @@ A：能但不可持续：
 追求极致性能？   → Faiss（手动管理持久化）
 ```
 
-**结合 `sports-takeout` 项目**：教练数据量预计 < 1 万，开发期可用 Chroma（嵌入式，零运维，pip install 即用，持久化到 `./data/chroma`）；**上线/多副本时首选 pgvector**（多副本共享 + HA + 事务一致性，见 [vectorstore.py](../app/clients/vectorstore.py) 的设计注释）。（⚠️ 当前两者都未部署，走 BM25 单路）
+**结合 `sports-takeout` 项目**：本项目已选型 **Milvus**（分布式 + HA + 多副本共享同一实例，HNSW ms 级召回，运维成熟 Attu/Prometheus）。pymilvus 未装时自动降级 BM25 单路。配置 `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_DATABASE` / `MILVUS_COLLECTION` / `MILVUS_DIM`（见 [vectorstore.py](../app/clients/vectorstore.py)）。
 
 **进阶追问 + 答案**：
 
@@ -3660,7 +3660,7 @@ A：
 - **独立向量库（Milvus / pgvector）**：所有副本连同一向量库服务，天然共享
 - **混合**：嵌入式作为本地缓存 + 独立库作为权威源
 
-本项目多副本上向量库时选 **pgvector**（天然共享，无需 reindex）；若开发期用 Chroma 需 `/internal/reindex` 端点（[04 §4.2](./04-RAG混合检索.md)）同步。（⚠️ 当前未部署向量库）
+本项目多副本已选型 **Milvus**（独立分布式服务，所有副本连同一实例天然共享，无需 reindex）。pymilvus 未装时降级 BM25 单路。
 
 **项目落地参考**：[#05 §3.11 Dockerfile](./05-商业化加固.md) · [#04 §4.2 增量更新](./04-RAG混合检索.md)
 
@@ -3909,7 +3909,7 @@ async def semantic_cache_lookup(query):
 
 | 优化手段 | 原理 | 收益 | 本项目适用 |
 |---|---|---|---|
-| **HNSW 索引** | 图索引替代暴力搜索 | 10x~100x | Chroma 默认用 HNSW |
+| **HNSW 索引** | 图索引替代暴力搜索 | 10x~100x | Milvus 用 HNSW（本项目选型） |
 | **降维** | 768 维 → 384 维 | 2x 速度，略降精度 | 二期考虑 |
 | **量化** | float32 → int8 | 4x 内存 + 2x 速度 | 大规模才需要 |
 | **分片并行** | 多分片并行召回 | 接近线性加速 | 百万级文档 |
@@ -3966,7 +3966,7 @@ A：双索引切换（Blue-Green）：
 3. B 构建完成后，原子切换：召回从 A 切到 B
 4. 删除旧索引 A
 
-本项目生产用 pgvector（HNSW 索引 + upsert，天然增量）；若开发期用 Chroma 则靠 `/internal/reindex` 端点（[04 §4.2](./04-RAG混合检索.md)）触发增量更新。（⚠️ 当前未部署向量库）
+本项目生产用 Milvus（HNSW 索引 + upsert，天然增量）；pymilvus 未装时降级 BM25 单路。
 
 **项目落地参考**：[#04 §2 混合检索](./04-RAG混合检索.md) · [#04 §4.2 增量更新](./04-RAG混合检索.md)
 

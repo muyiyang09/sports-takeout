@@ -2,6 +2,7 @@ package com.sky.service.impl;
 
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
+import com.sky.annotation.AuditLog;
 import com.sky.constant.JwtClaimsConstant;
 import com.sky.constant.MessageConstant;
 import com.sky.dto.CoachAuditDTO;
@@ -18,6 +19,7 @@ import com.sky.mapper.CoachMapper;
 import com.sky.properties.JwtProperties;
 import com.sky.result.PageResult;
 import com.sky.service.CoachService;
+import com.sky.service.TokenBlacklistService;
 import com.sky.utils.AesEncryptUtil;
 import com.sky.utils.JwtUtil;
 import com.sky.vo.CoachLoginVO;
@@ -25,9 +27,9 @@ import com.sky.vo.CoachVO;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.DigestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -44,8 +46,13 @@ public class CoachServiceImpl implements CoachService {
     private CoachCertificateMapper coachCertificateMapper;
     @Autowired
     private JwtProperties jwtProperties;
+    @Autowired
+    private TokenBlacklistService tokenBlacklistService;
 
-    @Value("${sky.encrypt.aes-key:SportsTakeoutKey}")
+    /** 密码哈希：BCrypt（无盐 MD5 已弃用，见 §5.5 安全审查） */
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+
+    @Value("${sky.encrypt.aes-key}")
     private String aesKey;
 
     /**
@@ -57,7 +64,7 @@ public class CoachServiceImpl implements CoachService {
         Coach coach = Coach.builder()
                 .name(coachRegisterDTO.getName())
                 .phone(coachRegisterDTO.getPhone())
-                .password(DigestUtils.md5DigestAsHex(coachRegisterDTO.getPassword().getBytes()))
+                .password(passwordEncoder.encode(coachRegisterDTO.getPassword()))
                 .sex(coachRegisterDTO.getSex())
                 .avatar(coachRegisterDTO.getAvatar())
                 .idNumber(AesEncryptUtil.encrypt(coachRegisterDTO.getIdNumber(), aesKey))
@@ -101,9 +108,8 @@ public class CoachServiceImpl implements CoachService {
             throw new AccountNotFoundException(MessageConstant.ACCOUNT_NOT_FOUND);
         }
 
-        //密码比对(MD5)
-        password = DigestUtils.md5DigestAsHex(password.getBytes());
-        if (!password.equals(coach.getPassword())) {
+        //密码比对(BCrypt matches)
+        if (!passwordEncoder.matches(password, coach.getPassword())) {
             throw new PasswordErrorException(MessageConstant.PASSWORD_ERROR);
         }
 
@@ -115,14 +121,19 @@ public class CoachServiceImpl implements CoachService {
         //生成 jwt
         Map<String, Object> claims = new HashMap<>();
         claims.put(JwtClaimsConstant.COACH_ID, coach.getId());
-        String token = JwtUtil.createJWT(
+        JwtUtil.JwtTokenResult tokenResult = JwtUtil.createJWT(
                 jwtProperties.getCoachSecretKey(),
                 jwtProperties.getCoachTtl(),
                 claims);
 
+        tokenBlacklistService.registerUserToken(
+                String.valueOf(coach.getId()),
+                tokenResult.getJti(),
+                jwtProperties.getCoachTtl());
+
         return CoachLoginVO.builder()
                 .id(coach.getId())
-                .token(token)
+                .token(tokenResult.getToken())
                 .name(coach.getName())
                 .phone(coach.getPhone())
                 .build();
@@ -132,6 +143,7 @@ public class CoachServiceImpl implements CoachService {
      * 审核教练(通过/驳回)
      */
     @Override
+    @AuditLog(type = "coachAudit", detail = "审核教练")
     public void auditCoach(CoachAuditDTO coachAuditDTO) {
         Coach coach = Coach.builder()
                 .id(coachAuditDTO.getCoachId())

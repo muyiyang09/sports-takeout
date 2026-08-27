@@ -1,5 +1,6 @@
 package com.sky.controller.admin;
 
+import com.sky.annotation.AdminOnly;
 import com.sky.dto.OrdersCancelDTO;
 import com.sky.dto.OrdersConfirmDTO;
 import com.sky.dto.OrdersPageQueryDTO;
@@ -97,6 +98,7 @@ public class OrderController {
      */
     @PutMapping("/refund/{id}")
     @Operation(summary = "处理退款")
+    @AdminOnly
     public Result handleRefund(@PathVariable("id") Long id, @RequestParam boolean agree) {
         orderService.handleRefund(id, agree);
         return Result.success();

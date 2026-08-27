@@ -1,6 +1,7 @@
 package com.sky.service;
 
 import com.sky.dto.*;
+import com.sky.entity.Orders;
 import com.sky.result.PageResult;
 import com.sky.vo.OrderPaymentVO;
 import com.sky.vo.OrderStatisticsVO;
@@ -118,4 +119,9 @@ public interface OrderService {
      * 管理端处理退款(8退款中 -> 9已退款 或 退回原状态)
      */
     void handleRefund(Long orderId, boolean agree);
+
+    /**
+     * 根据id获取订单
+     */
+    Orders getById(Long id);
 }

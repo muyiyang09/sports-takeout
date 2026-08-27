@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.github.xiaoymin.knife4j.core.util.CollectionUtils;
+import com.sky.annotation.AuditLog;
 import com.sky.constant.MessageConstant;
 import com.sky.context.BaseContext;
 import com.sky.dto.*;
@@ -23,11 +24,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,12 +61,25 @@ public class OrderServiceImpl implements OrderService {
     private CoachScheduleMapper coachScheduleMapper;
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+    @Autowired
+    private CourseMapper courseMapper;
+    @Autowired
+    private CoursePackageMapper coursePackageMapper;
+
+    /**
+     * 分布式锁 CAS 释放脚本（§6.21）：get==value 才 del，原子操作杜绝
+     * 「读-比较-删」三步之间的 TOCTOU（锁已过期被他人接管后误删）。
+     */
+    private static final DefaultRedisScript<Long> RELEASE_LOCK_SCRIPT = new DefaultRedisScript<>(
+            "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end",
+            Long.class);
 
     /**
      * 用户下单:构造订单(status=PENDING_PAYMENT, payStatus=UN_PAID),不锁排期,保存 orders + order_detail
      */
     @Override
     @Transactional
+    @AuditLog(type = "order.submit", detail = "用户下单")
     public OrderSubmitVO submit(OrdersSubmitDTO ordersSubmitDTO) {
         // 1.校验收货地址
         AddressBook addressBook = addressBookMapper.getById(ordersSubmitDTO.getAddressBookId());
@@ -86,10 +103,43 @@ public class OrderServiceImpl implements OrderService {
         order.setAddress(addressBook.getProvinceName() + addressBook.getCityName()
                 + addressBook.getDistrictName() + addressBook.getDetail());
 
+        // 3.服务端校验金额：校验明细价格 + 重新计算总金额
+        List<OrderDetail> orderDetails = ordersSubmitDTO.getOrderDetails();
+        if (!CollectionUtils.isEmpty(orderDetails)) {
+            BigDecimal calculatedAmount = BigDecimal.ZERO;
+            for (OrderDetail detail : orderDetails) {
+                if (detail.getCourseId() != null) {
+                    Course course = courseMapper.getById(detail.getCourseId());
+                    if (course == null) {
+                        throw new OrderBusinessException("课程不存在");
+                    }
+                    detail.setAmount(course.getPrice());
+                } else if (detail.getCoursePackageId() != null) {
+                    CoursePackage coursePackage = coursePackageMapper.getById(detail.getCoursePackageId());
+                    if (coursePackage == null) {
+                        throw new OrderBusinessException("套餐不存在");
+                    }
+                    detail.setAmount(coursePackage.getPrice());
+                }
+
+                BigDecimal detailAmount = detail.getAmount() != null
+                    ? detail.getAmount().multiply(new BigDecimal(detail.getNumber() != null ? detail.getNumber() : 1))
+                    : BigDecimal.ZERO;
+                calculatedAmount = calculatedAmount.add(detailAmount);
+            }
+
+            if (ordersSubmitDTO.getAmount() == null ||
+                calculatedAmount.subtract(ordersSubmitDTO.getAmount()).abs().compareTo(new BigDecimal("0.01")) > 0) {
+                log.warn("订单金额不匹配：客户端={}, 服务端计算={}", ordersSubmitDTO.getAmount(), calculatedAmount);
+                throw new OrderBusinessException("订单金额异常，请重新下单");
+            }
+
+            order.setAmount(calculatedAmount);
+        }
+
         orderMapper.insert(order);
 
-        // 3.保存订单明细
-        List<OrderDetail> orderDetails = ordersSubmitDTO.getOrderDetails();
+        // 4.保存订单明细
         if (!CollectionUtils.isEmpty(orderDetails)) {
             for (OrderDetail detail : orderDetails) {
                 detail.setOrderId(order.getId());
@@ -131,6 +181,11 @@ public class OrderServiceImpl implements OrderService {
         Orders ordersDB = orderMapper.getByNumber(outTradeNo);
         if (ordersDB == null) {
             throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+
+        if (!Orders.PENDING_PAYMENT.equals(ordersDB.getStatus())) {
+            log.info("订单 {} 状态已为 {}，跳过支付处理", outTradeNo, ordersDB.getStatus());
+            return;
         }
 
         // 1.更新订单状态:待付款 -> 待接单
@@ -249,7 +304,14 @@ public class OrderServiceImpl implements OrderService {
             throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
         }
 
-        // 更新订单状态为已取消
+        // §11.1：已付款订单不允许直接取消（钱收了单没了），必须走申请退款流程
+        if (status.equals(Orders.TO_BE_ACCEPTED)
+                && ordersDB.getPayStatus() != null
+                && ordersDB.getPayStatus().equals(Orders.PAID)) {
+            throw new OrderBusinessException("已支付订单请走申请退款流程");
+        }
+
+        // 更新订单状态为已取消（仅待付款订单允许无损取消）
         Orders orders = Orders.builder()
                 .id(ordersDB.getId())
                 .status(Orders.CANCELLED)
@@ -474,6 +536,7 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     @Transactional
+    @AuditLog(type = "order.seize", detail = "派单池抢单")
     public void seize(Long poolId, Long coachId) {
         String lockKey = "dispatch:seize:" + poolId;
         String lockValue = UUID.randomUUID().toString().replace("-", "");
@@ -503,11 +566,8 @@ public class OrderServiceImpl implements OrderService {
                     .build();
             orderMapper.update(orders);
         } finally {
-            // 释放锁(仅当 value 一致时删除,避免误删)
-            String current = stringRedisTemplate.opsForValue().get(lockKey);
-            if (lockValue.equals(current)) {
-                stringRedisTemplate.delete(lockKey);
-            }
+            // 释放锁：Lua CAS 原子 get==value→del，避免 TOCTOU 误删（§6.21）
+            stringRedisTemplate.execute(RELEASE_LOCK_SCRIPT, Collections.singletonList(lockKey), lockValue);
         }
     }
 
@@ -571,6 +631,7 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     @Transactional
+    @AuditLog(type = "order.refund", detail = "用户申请退款")
     public void applyRefund(Long orderId) {
         Orders ordersDB = orderMapper.getById(orderId);
         if (ordersDB == null) {
@@ -593,6 +654,7 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     @Transactional
+    @AuditLog(type = "order.handle", detail = "管理端处理退款")
     public void handleRefund(Long orderId, boolean agree) {
         Orders ordersDB = orderMapper.getById(orderId);
         if (ordersDB == null) {
@@ -622,6 +684,14 @@ public class OrderServiceImpl implements OrderService {
                     .build();
             orderMapper.update(orders);
         }
+    }
+
+    /**
+     * 根据id获取订单
+     */
+    @Override
+    public Orders getById(Long id) {
+        return orderMapper.getById(id);
     }
 
     // ==================== 私有辅助方法 ====================

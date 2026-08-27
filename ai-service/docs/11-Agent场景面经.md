@@ -38,7 +38,7 @@
 | review_summary「并行 Map」 | [review_summary.py](../app/graphs/review_summary.py) 的 map 是**单循环规则情感分类**，非并行 LLM | 说「Map-Reduce 结构，当前规则版」 |
 | review_summary「长期记忆写入向量库」 | 未实现，无向量库 | 说「目标设计」 |
 | cert_review「ReAct + 真实 OCR（阿里云/PaddleOCR）」 | [cert_review.py](../app/graphs/cert_review.py) 的核验是**确定性规则**（编号格式/有效期/姓名），OCR 是 mock 透传，ReAct 工具循环只是预留位 | 说「规则核验 + 预留 ReAct 位」 |
-| 向量库「pgvector」 | 未部署，`vector_db_backend` 只是配置开关 | 说「目标选型，当前 BM25」 |
+| 向量库「Milvus」 | 未部署，`vector_db_backend` 只是配置开关 | 说「目标选型，当前 BM25」 |
 
 **效果数据口径（最关键）**：全文所有「Recall 45%→78% / 52%→78%」「首次命中率 30%→62%」「150 倍」「19 倍」「12 秒」「召回 30 vs 50」等数字（含 §1.4 / §2.4 / §2.5 / §3.4 / §4.4 / §5.3 / §8 的正文和表格），**全部是设计目标/估算值，不是线上实测**——当前没有关键词搜索对照组、没有标注集、没上线，测不出这些数。
 
@@ -84,7 +84,7 @@
 | **review_summary** | Plan-and-Execute + Reflection | 分批打标签 → 聚合摘要 → 质量门控重写 | [review_summary.py](../app/graphs/review_summary.py) |
 | **cert_review** | 规则核验 + HITL | 字段抽取 → 规则校验 → 风险评估 → 人工确认 | [cert_review.py](../app/graphs/cert_review.py) |
 
-三 Agent 当前是**独立端点**（Supervisor 默认关），共享 Checkpointer（Redis + DB 兜底）；向量库（pgvector/Chroma）是目标选型，当前未部署、走 BM25 单路。
+三 Agent 当前是**独立端点**（Supervisor 默认关），共享 Checkpointer（Redis + DB 兜底）；向量库（Milvus）是目标选型，当前未部署、走 BM25 单路。
 
 ### 1.4 效果提升（R）
 
@@ -111,7 +111,7 @@
 
 > 成本有三块：
 > - **LLM 调用费**：每次推荐约 3-5 次 LLM 调用，单次约 0.02 元，单请求成本 0.1 元
-> - **基础设施**：Redis（Checkpointer）+ 向量库（pgvector/Chroma，目标选型，当前未部署、走 BM25），运维成本 +1 个中间件
+> - **基础设施**：Redis（Checkpointer）+ 向量库（Milvus，目标选型，当前未部署、走 BM25），运维成本 +1 个中间件
 > - **开发复杂度**：Graph 拓扑 + RAG 链路 + HITL，比传统 CRUD 复杂 3 倍
 >
 > 值不值看 ROI：传统方案推荐命中率 30%，Agent 方案 62%，每提升 1% 命中率带来 X 单转化，LLM 成本远小于转化收益。体育外卖客单价 200+ 元，0.1 元的 LLM 成本忽略不计。
@@ -539,20 +539,20 @@ Agent 做的是"预处理 + 建议"：提取证件信息、校验规则、给出
 **面试回答**：
 > 纯向量召回在语义泛化上强，但在精确词、数值约束、低频词上有盲区。混合检索三路互补：BM25 解决精确词 / 向量解决语义泛化 / SQL 解决硬约束（价格/区域/时段）。RRF 融合后 Recall@10 从单路 52% 提升到 78%。详见 [04-RAG混合检索.md](./04-RAG混合检索.md)。
 
-### 5.4 为什么选 pgvector 而不是 Chroma
+### 5.4 为什么选 Milvus
 
-> 注：这是**目标选型**，当前未部署任何向量库（走 BM25 单路，见 §0.1）。回答时表述为「上向量库时我倾向 pgvector」而非「我已用了 pgvector」。
+> 注：代码已选型 **Milvus**，但运行时尚未部署（pymilvus 未装则降级 BM25 单路，见 §0.1）。回答时表述为「我选 Milvus，pymilvus 未装则降级 BM25」而非「我已跑了 Milvus 召回」。
 
-| 维度 | Chroma（开发） | **pgvector**（生产） |
+| 维度 | 单机/嵌入式向量库 | **Milvus**（本项目生产） |
 |---|---|---|
-| 多副本共享 | ❌ 本地文件 | ✅ PostgreSQL 网络访问 |
-| HA | ❌ 单节点 | ✅ 主从复制 + failover |
-| 运维工具 | ❌ 无 | ✅ pg_dump / Prometheus |
-| 事务一致性 | ❌ 独立存储 | ✅ 和业务数据同库 |
-| HNSW 索引 | ✅ | ✅ |
+| 多副本共享 | ❌ 本地文件，副本独立 | ✅ 多副本连同一实例 |
+| HA | ❌ 单节点 | ✅ 分布式 + failover |
+| 运维工具 | ❌ 无 | ✅ Attu / Prometheus / Grafana |
+| HNSW + COSINE | ✅ | ✅ ms 级召回 |
+| 分布式扩展 | ❌ | ✅ 水平扩容 |
 
 **面试回答**：
-> Chroma 的 PersistentClient 是本地文件存储，多副本各自一份，A 副本写入 B 副本读不到。pgvector 是 PostgreSQL 扩展，多副本共享 + HA + 成熟运维。切换只改 [vectorstore.py](../app/clients/vectorstore.py) 一个文件 + `.env` 配置开关。详见 [04-RAG混合检索.md](./04-RAG混合检索.md)。
+> 单机/嵌入式向量库是本地文件存储，多副本各自一份，A 副本写入 B 副本读不到。Milvus 是分布式向量库，多副本共享同一实例 + HA + HNSW ms 级召回 + 运维成熟（Attu/Prometheus/Grafana）。本地用 `docker run -d --name milvus -p 19530:19530 milvusdb/milvus:latest` 或接 Zilliz 云。配置 MILVUS_URI/MILVUS_TOKEN/MILVUS_DATABASE/MILVUS_COLLECTION/MILVUS_DIM；pymilvus 未装则降级 BM25 单路。详见 [04-RAG混合检索.md](./04-RAG混合检索.md)。
 
 ### 5.5 为什么 Checkpointer 要 DB 兜底
 
@@ -586,7 +586,7 @@ Agent 做的是"预处理 + 建议"：提取证件信息、校验规则、给出
 | 记忆类型 | 存什么 | 存哪里 | 本项目用在哪 |
 |---|---|---|---|
 | **短期记忆** | 当前对话 state | Checkpointer（Redis） | 多轮对话上下文 |
-| **长期-情景** | 用户历史偏好 | 向量库（pgvector，目标选型） | recommend_coach 个性化 |
+| **长期-情景** | 用户历史偏好 | 向量库（Milvus，目标选型） | recommend_coach 个性化 |
 | **长期-情景** | 评价历史摘要 | 向量库（目标选型） | review_summary 对比 |
 | **长期-程序** | 审核规则 | 规则库 | cert_review 规则校验 |
 
@@ -661,7 +661,7 @@ MCP（Model Context Protocol）让 AI 服务通过标准化协议调用后端工
 >
 > 3. **证书审核 Agent**：规则核验 + HITL 人工确认。Agent 做预处理（字段抽取 + 编号/有效期/姓名规则校验），管理员做最终决策，安全性不降级。
 >
-> 技术栈：LangGraph + Redis Checkpointer（带 DB 兜底防 TTL 过期）+ 可选 Supervisor 多 Agent 调度。目标方案会接 pgvector + Cross-Encoder 精排。"
+> 技术栈：LangGraph + Redis Checkpointer（带 DB 兜底防 TTL 过期）+ 可选 Supervisor 多 Agent 调度。目标方案会接 Milvus + Cross-Encoder 精排。"
 
 ---
 

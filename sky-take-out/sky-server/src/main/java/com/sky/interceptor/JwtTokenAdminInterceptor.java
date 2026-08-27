@@ -3,6 +3,7 @@ package com.sky.interceptor;
 import com.sky.constant.JwtClaimsConstant;
 import com.sky.context.BaseContext;
 import com.sky.properties.JwtProperties;
+import com.sky.service.TokenBlacklistService;
 import com.sky.utils.JwtUtil;
 import io.jsonwebtoken.Claims;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,9 @@ public class JwtTokenAdminInterceptor implements HandlerInterceptor {
 
     @Autowired
     private JwtProperties jwtProperties;
+
+    @Autowired
+    private TokenBlacklistService tokenBlacklistService;
 
     /**
      * 校验jwt
@@ -44,15 +48,33 @@ public class JwtTokenAdminInterceptor implements HandlerInterceptor {
 
         //2、校验令牌
         try {
-            log.info("jwt校验:{}", token);
+            log.info("jwt校验:{}", token == null ? null : token.substring(0, Math.min(6, token.length())) + "***");
             Claims claims = JwtUtil.parseJWT(jwtProperties.getAdminSecretKey(), token);
             Long empId = Long.valueOf(claims.get(JwtClaimsConstant.EMP_ID).toString());
-            log.info("当前员工id：", empId);
+            log.info("当前员工id：{}", empId);
+
+            String jti = claims.get(JwtClaimsConstant.JTI) != null
+                    ? claims.get(JwtClaimsConstant.JTI).toString()
+                    : null;
+            if (jti != null && tokenBlacklistService.isBlacklisted(jti)) {
+                log.warn("token已被吊销, empId={}, jti={}", empId, jti);
+                response.setStatus(401);
+                return false;
+            }
+
+            if (jti != null) {
+                tokenBlacklistService.registerUserToken(
+                        String.valueOf(empId), jti, jwtProperties.getAdminTtl());
+            }
+
             BaseContext.setCurrentId(empId);
-            //3、通过，放行
+            // §6.27 RBAC：把角色写入线程上下文，供 @AdminOnly 切面校验
+            String role = claims.get(JwtClaimsConstant.ROLE) != null
+                    ? claims.get(JwtClaimsConstant.ROLE).toString()
+                    : "dev";
+            BaseContext.setCurrentRole(role);
             return true;
         } catch (Exception ex) {
-            //4、不通过，响应401状态码
             response.setStatus(401);
             return false;
         }

@@ -10,10 +10,13 @@ import com.sky.properties.JwtProperties;
 import com.sky.result.PageResult;
 import com.sky.result.Result;
 import com.sky.service.EmployeeService;
+import com.sky.service.TokenBlacklistService;
 import com.sky.utils.JwtUtil;
 import com.sky.vo.EmployeeLoginVO;
+import io.jsonwebtoken.Claims;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.Operation;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -34,6 +37,8 @@ public class EmployeeController {
     private EmployeeService employeeService;
     @Autowired
     private JwtProperties jwtProperties;
+    @Autowired
+    private TokenBlacklistService tokenBlacklistService;
 
     /**
      * 登录
@@ -43,23 +48,29 @@ public class EmployeeController {
      */
     @PostMapping("/login")
     public Result<EmployeeLoginVO> login(@RequestBody EmployeeLoginDTO employeeLoginDTO) {
-        log.info("员工登录：{}", employeeLoginDTO);
+        log.info("员工登录：{}", employeeLoginDTO.getUsername());
 
         Employee employee = employeeService.login(employeeLoginDTO);
 
         //登录成功后，生成jwt令牌
         Map<String, Object> claims = new HashMap<>();
         claims.put(JwtClaimsConstant.EMP_ID, employee.getId());
-        String token = JwtUtil.createJWT(
+        claims.put(JwtClaimsConstant.ROLE, employee.getRole() == null ? "dev" : employee.getRole());
+        JwtUtil.JwtTokenResult tokenResult = JwtUtil.createJWT(
                 jwtProperties.getAdminSecretKey(),
                 jwtProperties.getAdminTtl(),
                 claims);
+
+        tokenBlacklistService.registerUserToken(
+                String.valueOf(employee.getId()),
+                tokenResult.getJti(),
+                jwtProperties.getAdminTtl());
 
         EmployeeLoginVO employeeLoginVO = EmployeeLoginVO.builder()
                 .id(employee.getId())
                 .userName(employee.getUsername())
                 .name(employee.getName())
-                .token(token)
+                .token(tokenResult.getToken())
                 .build();
 
         return Result.success(employeeLoginVO);
@@ -71,7 +82,21 @@ public class EmployeeController {
      * @return
      */
     @PostMapping("/logout")
-    public Result<String> logout() {
+    public Result<String> logout(HttpServletRequest request) {
+        String token = request.getHeader(jwtProperties.getAdminTokenName());
+        if (token != null) {
+            try {
+                Claims claims = JwtUtil.parseJWT(
+                        jwtProperties.getAdminSecretKey(), token);
+                String jti = claims.get(JwtClaimsConstant.JTI) != null
+                        ? claims.get(JwtClaimsConstant.JTI).toString()
+                        : null;
+                if (jti != null) {
+                    tokenBlacklistService.blacklist(jti, jwtProperties.getAdminTtl());
+                }
+            } catch (Exception ignored) {
+            }
+        }
         return Result.success();
     }
 

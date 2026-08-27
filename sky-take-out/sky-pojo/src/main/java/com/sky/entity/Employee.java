@@ -32,6 +32,11 @@ public class Employee implements Serializable {
 
     private Integer status;
 
+    /**
+     * 角色（§6.27 RBAC）：admin / dev。仅 admin 可执行敏感管理操作（教练审核/退款处理等）。
+     */
+    private String role;
+
     //@JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;
 

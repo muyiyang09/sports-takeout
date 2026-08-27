@@ -14,7 +14,15 @@ cd sports-takeout
 
 # 2. 复制环境变量文件并修改
 cp .env.example .env
-# 编辑 .env，至少修改 MYSQL_ROOT_PASSWORD
+# 编辑 .env —— 以下为必填项（缺任一项 compose 启动即报错）：
+#   MYSQL_ROOT_PASSWORD      MySQL root 密码
+#   MYSQL_APP_PASSWORD       应用账号 sports_app 密码（后端/ai-service 用它连库）
+#   REDIS_PASSWORD           Redis 密码（已启用 requirepass）
+#   MILVUS_MINIO_ACCESS_KEY / MILVUS_MINIO_SECRET_KEY   Milvus 内部对象存储凭据
+# 建议同时填写：
+#   SKY_JWT_ADMIN_KEY / SKY_JWT_USER_KEY / SKY_JWT_COACH_KEY / SKY_AES_KEY
+#   SERVICE_AUTH_TOKEN       后端 ↔ ai-service 机器间鉴权共享密钥
+#   LLM_API_KEY              AI 推荐链路 LLM Key
 
 # 3. 一键启动（首次会自动构建镜像 + 初始化数据库）
 docker-compose up -d
@@ -31,10 +39,18 @@ docker-compose logs -f backend
 | 服务 | 地址 | 说明 |
 |------|------|------|
 | 后端 API | http://localhost:8080 | Spring Boot + Knife4j |
-| 接口文档 | http://localhost:8080/doc.html | Knife4j UI |
+| 接口文档 | http://localhost:8080/doc.html | Knife4j UI（生产 profile 自动关闭） |
 | 管理端前端 | http://localhost:5173 | Vue3 + Element Plus |
-| MySQL | localhost:3306 | 用户 root / 密码见 .env |
-| Redis | localhost:6379 | 无密码 |
+| AI 微服务 | http://127.0.0.1:18000 | 仅本机可访问，不对公网暴露；需 x-service-token 鉴权 |
+| Milvus | localhost:19530 | 向量库 gRPC（etcd + minio 三服务栈） |
+| Attu（可选） | http://localhost:8001 | Milvus 可视化运维台 |
+| MySQL | 127.0.0.1:3306 | 应用账号 sports_app / 密码见 .env；root 仅初始化用 |
+| Redis | 127.0.0.1:6379 | 已启用 requirepass，密码见 .env |
+| Prometheus | http://localhost:9090 | 指标采集 |
+| Grafana | http://localhost:3000 | 可视化面板（admin/admin，上线请改密码） |
+| Alertmanager | http://localhost:9093 | 告警路由 → 钉钉/飞书 webhook |
+
+> 安全基线：MySQL/Redis/MinIO 控制台仅绑定 `127.0.0.1`；ai-service 的 `/v1/ai/*` 全部要求 `x-service-token` 头（与后端共享 SERVICE_AUTH_TOKEN）；JWT/AES 密钥一律走环境变量注入，缺省即启动失败。
 
 ### 默认管理员账号
 - 用户名：admin
@@ -98,10 +114,21 @@ npm run dev
 
 ```
 sports-takeout/
-├── docker-compose.yml          # Docker Compose 编排
-├── .env.example                # 环境变量模板
+├── docker-compose.yml          # Docker Compose 编排（含 Milvus 三服务栈 + 可观测栈）
+├── .env.example                # 环境变量模板（含必填项注释）
 ├── DEPLOY.md                   # 本文档
 ├── sql/sports_take_out.sql     # 数据库建表 + 种子数据（14 张表）
+├── sql/07-idempotency-indexes.sql  # 幂等唯一索引 + 应用账号授权
+├── scripts/
+│   ├── smoke_test.sh           # 端到端冒烟测试（CI/CD 回滚依据）
+│   └── backup_mysql.sh         # MySQL 每日备份（gzip + 过期清理）
+├── prometheus/
+│   ├── prometheus.yml          # 采集配置
+│   └── alertmanager.yml        # 告警路由配置
+├── ai-service/                 # AI 微服务（FastAPI + LangGraph + Milvus）
+│   ├── Dockerfile              # AI 服务容器构建
+│   ├── .env.example            # AI 服务环境变量模板
+│   └── app/                    # graphs / clients / middleware / core / eval / mcp / tools
 ├── sky-take-out/               # 后端工程
 │   ├── Dockerfile              # 后端容器构建
 │   ├── sky-common/             # 公共模块（工具类/常量/异常）
@@ -126,10 +153,28 @@ sports-takeout/
 
 ---
 
-## 四、常见问题
+## 四、运维脚本
+
+```bash
+# 端到端冒烟测试（任一失败 exit 1，可作为部署后自动回滚依据）
+bash scripts/smoke_test.sh
+
+# MySQL 每日备份（crontab 示例：每天凌晨 2 点）
+0 2 * * * /opt/sports-takeout/scripts/backup_mysql.sh
+```
+
+---
+
+## 五、常见问题
 
 ### Q: 启动后接口返回 500？
 A: 检查 MySQL 和 Redis 是否正常启动。后端日志会打印连接异常。
+
+### Q: compose up 报 "required variable XXX is empty"？
+A: `.env` 中缺少必填环境变量（MYSQL_ROOT_PASSWORD / MYSQL_APP_PASSWORD / REDIS_PASSWORD / MILVUS_MINIO_ACCESS_KEY 等），按 `.env.example` 注释补齐即可。
+
+### Q: AI 接口返回 401？
+A: `/v1/ai/*` 需要 `x-service-token` 请求头，值为后端与 ai-service 共享的 `SERVICE_AUTH_TOKEN`（见 .env）。
 
 ### Q: 管理端登录提示 401？
 A: 确认后端已启动，且 `application-dev.yml` 中的数据库配置正确。默认账号 admin/123456。

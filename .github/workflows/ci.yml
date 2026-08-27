@@ -1,0 +1,60 @@
+# §5.19 CI：lint + format 校验 + 测试 + 镜像构建
+# 触发：push 到 main / 任意 PR
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ai-service:
+    name: ai-service (ruff + pytest + docker build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Pytest
+        run: uv run pytest -q
+
+      - name: Build image (smoke)
+        run: docker build -t sports-ai:ci .
+
+  backend:
+    name: backend (mvn package + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sky-take-out
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build & test
+        run: mvn -B clean package
+
+      - name: Build image (smoke)
+        run: docker build -t sports-backend:ci .

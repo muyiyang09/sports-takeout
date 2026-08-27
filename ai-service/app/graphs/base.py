@@ -5,7 +5,8 @@
 """
 from __future__ import annotations
 
-from typing import Any, TypedDict, TypeVar
+import asyncio
+from typing import Any, Awaitable, Callable, TypedDict, TypeVar
 
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
@@ -13,6 +14,19 @@ from langgraph.graph.message import add_messages
 from typing_extensions import Annotated
 
 T = TypeVar("T")
+
+
+# =============================================================================
+# 节点执行兜底（§6.30 死循环防护）：asyncio.wait_for 强制终止挂起/死循环节点。
+# 超时抛 asyncio.TimeoutError，由上层 graph 统一捕获降级；配合各图已有的
+# refine_count / reason_attempts 等循环硬上限，双保险保证图必终止。
+# =============================================================================
+def invoke_node(node: Callable[[dict[str, Any]], Awaitable[Any]],
+                state: dict[str, Any],
+                timeout: float | None = None) -> Awaitable[Any]:
+    from app.config import settings
+
+    return asyncio.wait_for(node(state), timeout or settings.graph_node_timeout)
 
 
 # =============================================================================
@@ -80,4 +94,5 @@ __all__ = [
     "TypedDict",
     "ConditionalRouter",
     "to_human",
+    "invoke_node",
 ]

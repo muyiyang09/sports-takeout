@@ -3,17 +3,44 @@
     "version": "1.0.0",
     "description": "体育外卖 · 上门私教平台管理端",
     "private": true,
+    "type": "module",
     "scripts": {
         "dev": "vite",
         "build": "vite build",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "type-check": "vue-tsc --noEmit",
+        "test": "vitest run",
+        "lint": "eslint . --ext .vue,.js,.ts",
+        "lint:fix": "eslint . --ext .vue,.js,.ts --fix",
+        "format": "prettier --write ."
     },
     "dependencies": {
         "vue": "^3.4.21",
+        "vue-router": "^4.3.0",
+        "pinia": "^2.1.7",
         "element-plus": "^2.6.1"
     },
     "devDependencies": {
         "@vitejs/plugin-vue": "^5.0.4",
-        "vite": "^5.2.0"
+        "vite": "^5.2.0",
+        "typescript": "^5.4.5",
+        "vue-tsc": "^2.0.19",
+        "vitest": "^1.6.0",
+        "@vue/test-utils": "^2.4.5",
+        "jsdom": "^24.0.0",
+        "eslint": "^8.57.0",
+        "eslint-plugin-vue": "^9.25.0",
+        "@vue/eslint-config-typescript": "^13.0.0",
+        "prettier": "^3.2.5",
+        "eslint-config-prettier": "^9.1.0",
+        "lint-staged": "^15.2.2",
+        "@commitlint/cli": "^19.3.0",
+        "@commitlint/config-conventional": "^19.2.2"
+    },
+    "lint-staged": {
+        "*.{vue,js,ts}": [
+            "eslint --fix",
+            "prettier --write"
+        ]
     }
 }

@@ -22,7 +22,7 @@
 | Node2 内部实现 | ✅ 重构 | 从规则打分 → 多路召回 + 融合 + Rerank |
 | Node1 / Node3 实现 | ❌ 不动 | 沿用 #03 改造后的版本 |
 | Loop 控制字段（retry_count / branch / relaxed_fields） | ✅ 保留 | 与 #03 兼容，向量库挂了仍能走规则兜底 |
-| 数据库 | ⚠️ 可选 | 默认零迁移；二期可选 pgvector / Milvus 升级 |
+| 数据库 | ✅ 已定 | Milvus 单后端（生产唯一），MySQL 无需迁移 |
 
 ---
 
@@ -111,7 +111,7 @@ Query ─────────────┼─ 向量稠密召回（语义�
 | 召回路数 | 单路 / 双路 / 三路 | **三路** | 教练推荐三路各有不可替代的语义（结构化 / 字面 / 语义） |
 | 融合算法 | RRF / 线性加权 / Convex | **RRF** | BM25 与向量分数尺度完全不同，RRF 只用 rank 不用 score，无需归一化 |
 | Rerank | 用 / 不用 | **用**（可选开关） | 召回阶段用双塔模型（快），重排用 Cross-Encoder（准） |
-| 向量库 | 内存 / Chroma / pgvector / Milvus | **Chroma**（默认）/ **pgvector**（升级） | 数据量小（几千教练），Chroma 嵌入式零运维；若要持久化/多副本用 pgvector |
+| 向量库 | numpy / Chroma / pgvector / Milvus | **Milvus** | 分布式+HA，多副本共享同一实例；HNSW+COSINE ms 级召回；K8s/云原生友好 |
 | Embedding 模型 | bge-m3 / bge-large-zh / OpenAI / m3e | **bge-m3** | 免费、中文好、单模型同时输出稠密+稀疏向量（一份模型干两路活） |
 | Reranker | bge-reranker-v2-m3 / Cohere / jina | **bge-reranker-v2-m3** | 免费、中文好、本地部署 |
 | 兜底策略 | 全切规则 / 全切向量 | **混合分**：α·规则 + β·向量 + γ·BM25 | 任一路挂了仍能跑（#03 兼容） |
@@ -152,7 +152,7 @@ Query ─────────────┼─ 向量稠密召回（语义�
    ┌────────────────────┐                    ┌────────────────────┐
    │ Stage 2a: BM25 召回│                    │ Stage 2b: 向量召回  │
    │ (filtered 内)       │                    │ (filtered 内)       │
-   │ MySQL FULLTEXT      │                    │ Chroma / pgvector   │
+   │ MySQL FULLTEXT      │                    │ Milvus              │
    │ 输出：top 50 + rank │                    │ 输出：top 50 + rank │
    └────────────────────┘                    └────────────────────┘
                                   │
@@ -332,12 +332,12 @@ def rebuild_index() -> int:
 | 方案 | 部署 | 持久化 | 多副本 | 适用数据量 | 推荐 |
 |---|---|---|---|---|---|
 | **numpy + 内存** | 进程内 | ❌ | ❌ | < 1 万 | 起步阶段 |
-| **Chroma** | 嵌入式 | ✅ 文件 | ❌ | < 100 万 | **本项目首选** |
+| **Chroma** | 嵌入式 | ✅ 文件 | ❌ | < 100 万 | 嵌入式首选 |
 | **pgvector** | PostgreSQL 扩展 | ✅ | ✅ | < 1000 万 | 已有 PG 时 |
-| **Milvus** | 独立服务 | ✅ | ✅ | > 1000 万 | 大规模 |
+| **Milvus** | 独立服务 | ✅ | ✅ | > 1000 万 | **本项目首选** |
 | **Faiss** | 进程内 | ⚠️ | ❌ | 任意 | 性能极致 |
 
-**本项目推荐：Chroma** —— 嵌入式（pip 安装即用，无独立服务），数据量小，与 LangChain 集成好，支持持久化到本地文件。
+**本项目选 Milvus** —— 分布式+HA（多节点副本，原生网络访问，无本地文件痛点）；HNSW+COSINE ms 级召回；多副本共享同一实例（K8s/云原生友好）；运维工具链成熟（Attu/Prometheus/Grafana）。
 
 #### 3.4.3 代码骨架
 
@@ -391,8 +391,9 @@ def embed_one(text: str) -> np.ndarray:
 
 ```python
 # app/clients/vectorstore.py（新增）
-"""向量存储：基于 Chroma 的本地嵌入式向量库。
-启动时惰性构建，支持持久化到磁盘。
+"""向量存储：基于 pymilvus MilvusClient 的分布式向量库（生产唯一后端）。
+启动时惰性建集合 + HNSW 索引，支持多副本共享同一实例。
+pymilvus 未装 / Milvus 不可达 → 向量召回返回空，主链路退回 BM25 单路。
 """
 from __future__ import annotations
 
@@ -400,69 +401,123 @@ import logging
 from typing import Any, Optional
 
 from app.clients.embedding import embed, embed_one
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_store = None
+_client = None
+_collection_ready = False
 
 
-def _get_store():
-    """惰性获取 Chroma 存储。"""
-    global _store
-    if _store is None:
-        import chromadb  # type: ignore
-        client = chromadb.PersistentClient(path=settings.vector_db_path)
-        _store = client.get_or_create_collection(
-            name="coach_bio",
-            metadata={"hnsw:space": "cosine"},
+def _get_client():
+    """惰性获取 MilvusClient（pymilvus 2.4+）。"""
+    global _client
+    if _client is None:
+        from pymilvus import MilvusClient  # type: ignore
+        _client = MilvusClient(
+            uri=settings.milvus_uri,
+            token=settings.milvus_token,
+            db_name=settings.milvus_database,
         )
-        logger.info("[VectorStore] Chroma 集合已就绪，path=%s", settings.vector_db_path)
-    return _store
+        logger.info("[VectorStore] Milvus 客户端就绪，uri=%s db=%s",
+                    settings.milvus_uri, settings.milvus_database)
+    return _client
+
+
+def _ensure_collection():
+    """惰性创建集合（schema: id/embedding/document/metadata + HNSW COSINE 索引）。"""
+    global _collection_ready
+    if _collection_ready:
+        return
+    from pymilvus import DataType  # type: ignore
+    client = _get_client()
+    name = settings.milvus_collection
+
+    if not client.has_collection(name):
+        schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.VARCHAR, is_primary=True, max_length=64)
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=settings.milvus_dim)
+        schema.add_field("document", DataType.VARCHAR, max_length=65535)
+        schema.add_field("metadata", DataType.JSON)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index(
+            field_name="embedding",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 16, "efConstruction": 64},
+        )
+        client.create_collection(name, schema=schema, index_params=index_params)
+        logger.info("[VectorStore] Milvus 集合已创建，name=%s dim=%d",
+                    name, settings.milvus_dim)
+
+    client.load_collection(name)
+    _collection_ready = True
 
 
 def upsert_coaches(coaches: list[dict[str, Any]]) -> int:
     """批量 upsert 教练向量（启动时 / 教练更新时调用）。"""
     if not coaches:
         return 0
-    store = _get_store()
+    _ensure_collection()
+    client = _get_client()
     texts = [f"{c.get('name', '')} {c.get('bio', '')} {c.get('city_name', '')}"
              for c in coaches]
     vectors = embed(texts)
-    store.upsert(
-        ids=[f"coach_{c['coach_id']}" for c in coaches],
-        embeddings=vectors.tolist(),
-        documents=texts,
-        metadatas=[{"coach_id": c["coach_id"]} for c in coaches],
+    client.upsert(
+        collection_name=settings.milvus_collection,
+        data=[
+            {
+                "id": f"coach_{c['coach_id']}",
+                "embedding": vectors[i].tolist(),
+                "document": texts[i],
+                "metadata": {"coach_id": c["coach_id"]},
+            }
+            for i, c in enumerate(coaches)
+        ],
     )
     logger.info("[VectorStore] upsert %d 教练向量", len(coaches))
     return len(coaches)
 
 
 def search(query: str, top_k: int = 50) -> list[tuple[int, float]]:
-    """向量召回。返回 [(coach_id, similarity)]。"""
+    """向量召回。返回 [(coach_id, similarity)]。
+    pymilvus 未装 / Milvus 不可达 → 返回空，主链路退回 BM25 单路。
+    """
     if not query.strip():
         return []
     try:
-        store = _get_store()
+        _ensure_collection()
+        client = _get_client()
         query_vec = embed_one(query).tolist()
-        result = store.query(query_embeddings=[query_vec], n_results=top_k)
-        ids = [
-            int(m["coach_id"]) for m in result["metadatas"][0]
+        result = client.search(
+            collection_name=settings.milvus_collection,
+            data=[query_vec],
+            limit=top_k,
+            output_fields=["metadata"],
+            search_params={"params": {"ef": 64}},
+        )
+        hits = result[0]  # COSINE metric 下 distance 即相似度（越大越相似）
+        return [
+            (int(hit["entity"]["metadata"]["coach_id"]), float(hit["distance"]))
+            for hit in hits
         ]
-        sims = result["distances"][0]  # cosine distance → similarity = 1 - dist
-        return [(ids[i], float(1 - sims[i])) for i in range(len(ids))]
     except Exception as exc:
-        logger.warning("[VectorStore] 召回失败：%s", exc)
+        logger.warning("[VectorStore] 召回失败（向量召回返回空，主链路退回 BM25 单路）：%s", exc)
         return []
 
 
 def rebuild(coaches: list[dict[str, Any]]) -> int:
-    """全量重建（删旧 + upsert 新）。"""
+    """全量重建（drop 旧集合 + 重建 schema + upsert 新）。"""
+    global _collection_ready
     try:
-        store = _get_store()
-        store.delete(where={"coach_id": {"$gte": 0}})  # 删全部
+        client = _get_client()
+        if client.has_collection(settings.milvus_collection):
+            client.drop_collection(settings.milvus_collection)
     except Exception:
         pass
+    _collection_ready = False
+    _ensure_collection()
     return upsert_coaches(coaches)
 ```
 
@@ -811,10 +866,26 @@ embedding_device: str = Field(
 )
 embedding_use_fp16: bool = Field(default=True)
 
-# —— 向量库 ——
-vector_db_path: str = Field(
-    default="./data/chroma",
-    description="Chroma 持久化目录",
+# —— 向量库（Milvus 单后端）——
+milvus_uri: str = Field(
+    default="http://127.0.0.1:19530",
+    description="Milvus 连接地址（生产唯一向量库）",
+)
+milvus_token: str = Field(
+    default="",
+    description="Milvus 鉴权 token（无鉴权留空）",
+)
+milvus_database: str = Field(
+    default="default",
+    description="Milvus database 名",
+)
+milvus_collection: str = Field(
+    default="ai_vector_coach",
+    description="Milvus collection 名",
+)
+milvus_dim: int = Field(
+    default=1024,
+    description="向量维度（与 bge-m3 dense 1024 对齐）",
 )
 vector_skip_initial_upsert: bool = Field(
     default=False,
@@ -843,7 +914,11 @@ HYBRID_RETRIEVAL_ENABLED=false      # 二期灰度开启
 EMBEDDING_MODEL=BAAI/bge-m3
 EMBEDDING_DEVICE=cpu
 EMBEDDING_USE_FP16=true
-VECTOR_DB_PATH=./data/chroma
+MILVUS_URI=http://127.0.0.1:19530
+MILVUS_TOKEN=
+MILVUS_DATABASE=default
+MILVUS_COLLECTION=ai_vector_coach
+MILVUS_DIM=1024
 VECTOR_SKIP_INITIAL_UPSERT=false
 RERANKER_ENABLED=true
 RERANKER_MODEL=BAAI/bge-reranker-v2-m3
@@ -860,7 +935,7 @@ dependencies = [
     # ... 原依赖 ...
     "rank-bm25==0.2.2",            # BM25 实现
     "jieba==0.42.1",               # 中文分词
-    "chromadb==0.5.20",            # 嵌入式向量库
+    "pymilvus>=2.4.0",            # 向量库（Milvus 单后端）
     "FlagEmbedding==1.3.4",        # bge-m3 + bge-reranker
     "numpy>=1.26,<2.0",            # 向量计算
 ]
@@ -872,7 +947,7 @@ dependencies = [
 
 | 步骤 | 文件 | 改动 | 说明 |
 |---|---|---|---|
-| 1 | `pyproject.toml` | 加 5 个依赖 | rank-bm25 / jieba / chromadb / FlagEmbedding / numpy |
+| 1 | `pyproject.toml` | 加 5 个依赖 | rank-bm25 / jieba / pymilvus / FlagEmbedding / numpy |
 | 2 | `app/config.py` | 加 11 个字段 | 见 §5.1 |
 | 3 | `.env.example` | 加 11 个环境变量 | 见 §5.2 |
 | 4 | `app/clients/bm25.py` | 新建 | 见 §3.3.2 |
@@ -894,7 +969,7 @@ dependencies = [
 | **C1 同义词召回** | query="产后恢复"，bio 含"孕产康复" | 向量召回命中（旧规则只给 40 分） |
 | **C2 关键词精确命中** | query="减脂"，bio 含"减脂" | BM25 召回 top1，向量召回 top1（双路命中） |
 | **C3 结构化过滤生效** | city="北京市"，level=4 | 仅金牌北京教练入榜（向量不能越界） |
-| **C4 兜底** | 关掉 Chroma + Reranker | 走规则分，仍能返回结果（与 #03 行为一致） |
+| **C4 兜底** | 关掉 Milvus + Reranker | 走规则分，仍能返回结果（与 #03 行为一致） |
 | **C5 性能** | 1000 条教练 | 单次混合检索 < 500ms（含 Rerank） |
 
 ### 7.2 与 #03 兼容性验收
@@ -918,7 +993,7 @@ dependencies = [
 | 召回路数 | 单路 / 双路 / 三路 | 三路 | 教练推荐三路各有不可替代语义 |
 | 融合算法 | RRF / 线性加权 / Convex | RRF | 不依赖分数尺度，跨路天然兼容 |
 | BM25 数据源 | MySQL FULLTEXT / rank_bm25 / ES | rank_bm25 | 数据量小，零运维 |
-| 向量库 | numpy / Chroma / pgvector / Milvus | Chroma | 嵌入式、持久化、与 LangChain 集成 |
+| 向量库 | numpy / Chroma / pgvector / Milvus | Milvus | 分布式+HA、多副本共享、HNSW+COSINE ms 级召回 |
 | Embedding | bge-m3 / bge-large-zh / OpenAI | bge-m3 | 免费、中文好、单模型多向量 |
 | Reranker | bge-reranker-v2-m3 / Cohere / jina | bge-reranker-v2-m3 | 免费、中文好、本地部署 |
 | Rerank 启用 | 默认开 / 默认关 | 默认开（数据量小） | 数据量小跑得起 |
@@ -947,7 +1022,7 @@ dependencies = [
 3. **RRF 是跨尺度融合的银弹**：当多路召回分数尺度不同时（BM25 vs 向量相似度），用 rank 不用 score
 4. **Embedding + Rerank 用同源模型族**：bge-m3 + bge-reranker 同出 BAAI，对齐训练数据，效果更好
 5. **保留规则分作兜底**：混合检索是"加强"不是"替代"，向量库挂了仍能跑（与 #03 Loop 工程兼容）
-6. **数据量决定选型**：< 1 万用 rank_bm25 + Chroma；10 万级上 ES + Milvus；百万级必上分布式向量库
+6. **本项目统一选 Milvus**：分布式+HA，多副本共享同一实例，数据量小也无需切嵌入式库；选型科普对比见 §3.4.2
 7. **增量 + 定时全量双保险**：增量保证实时，定时全量兜底防漏
 
 回复「开始 #05」推进商业化加固，或就 #04 某节展开讨论。

@@ -1,0 +1,25 @@
+# 本机密钥 / 环境（绝不进镜像）
+.env
+.env.*
+!.env.example
+
+# VCS
+.git/
+.gitignore
+
+# Python 缓存 / 虚拟环境
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 测试 / 文档 / 构建产物（不进生产镜像）
+tests/
+docs/
+*.md
+dist/
+build/

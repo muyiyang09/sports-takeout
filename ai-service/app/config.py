@@ -9,6 +9,13 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _default_checkpointer_backend() -> str:
+    """prod 环境（SERVICE_ENV=prod）默认 redis；开发机可零依赖跑 memory。"""
+    import os
+
+    return "redis" if os.getenv("SERVICE_ENV") == "prod" else "memory"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -30,6 +37,9 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     llm_timeout: int = Field(default=60, description="单次 LLM 请求超时（秒）")
     llm_max_retries: int = Field(default=2, description="LiteLLM 内部重试次数")
+    # §6.30 死循环防护：单节点最大执行秒数，超时 asyncio.wait_for 强制终止。
+    # 需 > 最坏节点耗时（llm_timeout=60 × 重试），用 300s 做安全网，不误杀慢节点。
+    graph_node_timeout: int = Field(default=300, description="单节点最大执行秒数，超时强制终止")
 
     # —— MySQL（只读，查 coach/course 等现有表）——
     mysql_host: str = "127.0.0.1"
@@ -67,23 +77,18 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="BAAI/bge-m3", description="Embedding 模型名（HuggingFace）")
     embedding_device: str = Field(default="cpu", description="cpu / cuda / mps")
     embedding_use_fp16: bool = Field(default=True)
-    # 向量库后端选择：chroma（开发）/ pgvector（生产首选）/ chroma_http（过渡）
-    vector_db_backend: str = Field(
-        default="chroma", pattern=r"^(chroma|chroma_http|pgvector)$",
-        description="向量库后端：chroma（本地文件，开发）/ chroma_http（Docker 独立部署，过渡）/ pgvector（PostgreSQL 扩展，生产首选）",
+    # 向量库：Milvus 单后端（生产唯一）。pymilvus 未装 / Milvus 不可达时，向量召回降级为 BM25 单路
+    milvus_uri: str = Field(
+        default="http://127.0.0.1:19530",
+        description="Milvus 连接 URI，如 http://127.0.0.1:19530；Zilliz 云用 https://xxx.zillizcloud.com",
     )
-    vector_db_path: str = Field(default="./data/chroma", description="Chroma 本地持久化目录（仅 chroma 模式）")
+    milvus_token: str = Field(default="", description="Milvus 认证 token（本地部署留空；Zilliz 云用 apikey）")
+    milvus_database: str = Field(default="default", description="Milvus 数据库名")
+    milvus_collection: str = Field(default="ai_vector_coach", description="向量 collection 名")
+    milvus_dim: int = Field(default=1024, description="向量维度（bge-m3=1024）")
     vector_skip_initial_upsert: bool = Field(
         default=False, description="启动时是否跳过 upsert（已建索引时 True 加速启动）"
     )
-    # pgvector 连接配置（仅 vector_db_backend=pgvector 时用）
-    pgvector_host: str = Field(default="127.0.0.1", description="PostgreSQL 主机")
-    pgvector_port: int = Field(default=5432, description="PostgreSQL 端口")
-    pgvector_user: str = Field(default="postgres", description="PostgreSQL 用户名")
-    pgvector_password: str = Field(default="", description="PostgreSQL 密码")
-    pgvector_database: str = Field(default="sports_takeout", description="PostgreSQL 数据库名")
-    pgvector_table: str = Field(default="ai_vector_coach", description="pgvector 向量表名")
-    pgvector_dim: int = Field(default=1024, description="向量维度（bge-m3=1024）")
     reranker_model: str = Field(default="BAAI/bge-reranker-v2-m3", description="Reranker 模型名")
     reranker_device: str = Field(default="cpu", description="cpu / cuda / mps")
     reranker_use_fp16: bool = Field(default=True)
@@ -115,8 +120,10 @@ class Settings(BaseSettings):
 
     # —— Checkpointer（上线加固：崩溃恢复 + 多副本共享状态 + DB 灾备）——
     checkpointer_backend: str = Field(
-        default="memory", pattern=r"^(memory|redis)$",
-        description="Checkpointer 后端：memory（开发）/ redis（生产，多副本共享 + TTL）",
+        default_factory=lambda: _default_checkpointer_backend(),
+        pattern=r"^(memory|redis)$",
+        description="Checkpointer 后端：memory(开发默认)/redis(prod 默认)。"
+                    "SERVICE_ENV=prod 时隐式切 redis，除非显式设置 CHECKPOINTER_BACKEND。",
     )
     checkpoint_ttl_minutes: int = Field(default=60, description="Checkpoint TTL（分钟），教练推荐/摘要 1h 足够")
     checkpoint_db_fallback: bool = Field(
@@ -128,6 +135,10 @@ class Settings(BaseSettings):
     service_host: str = "0.0.0.0"
     service_port: int = 18000
     service_env: str = Field(default="dev", pattern=r"^(dev|test|prod)$")
+
+    # —— CORS（§6.31）：来源从 env 配置；credentials=True 时禁止 "*" ——
+    cors_origins: str = Field(default="", description="CORS 允许来源（csv）；留空时 dev 默认 *，prod 需显式配置")
+    cors_allow_credentials: bool = Field(default=True, description="是否允许携带凭据；True 时禁止 allow_origins 含 *")
 
     @property
     def mysql_dsn(self) -> str:

@@ -151,7 +151,7 @@
 - **建议**：
   1. Phase 1 先做"显式语义记忆"：在 recommend_coach 加一个 `extract_user_facts` 节点，抽取用户主动告知的事实（腰突/孕期/伤病史），写入 MySQL `user_facts` 表
   2. Phase 5 评价摘要 Agent 落地时做"情景记忆"：用户历史评价写入向量库，下次推荐时召回
-  3. 选型：**pgvector** 而非 Milvus——本项目已有 MySQL，pgvector 是 PostgreSQL 扩展，避免引入新组件
+  3. 选型：**Milvus**（分布式+HA+多副本共享同一实例，支撑 AI 服务多副本部署；HNSW+COSINE ms 级召回，运维成熟 Attu/Prometheus/Grafana）
 
 ### 2.3 跨会话记忆召回范式
 

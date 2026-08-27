@@ -1,5 +1,6 @@
 package com.sky.controller.admin;
 
+import com.sky.annotation.AdminOnly;
 import com.sky.context.BaseContext;
 import com.sky.dto.CoachAuditDTO;
 import com.sky.dto.CoachPageQueryDTO;
@@ -52,6 +53,7 @@ public class CoachController {
      */
     @PostMapping("/audit")
     @Operation(summary = "审核教练")
+    @AdminOnly
     public Result audit(@RequestBody CoachAuditDTO coachAuditDTO) {
         log.info("审核教练：{}", coachAuditDTO);
         coachAuditDTO.setAuditUser(BaseContext.getCurrentId());
@@ -64,6 +66,7 @@ public class CoachController {
      */
     @PostMapping("/cert/audit")
     @Operation(summary = "审核教练资质证书")
+    @AdminOnly
     public Result auditCertificate(Long certId, Integer status, String rejectReason) {
         log.info("审核教练资质证书：certId={}, status={}, rejectReason={}", certId, status, rejectReason);
         coachService.auditCertificate(certId, status, rejectReason, BaseContext.getCurrentId());

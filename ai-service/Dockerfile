@@ -7,7 +7,7 @@ WORKDIR /app
 # 复制源码 + 依赖清单，装包（含全部依赖）
 COPY . .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+    && pip install --no-cache-dir ".[vector-milvus]"
 
 # 非 root 运行（安全合规硬指标）
 RUN useradd -m -u 1000 appuser

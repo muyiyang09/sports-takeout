@@ -34,22 +34,15 @@ dependencies = [
 dev = [
     "pytest==8.3.3",
     "rich==13.9.4",
+    # —— 工程化三件套（§5.17）：lint / format / 类型检查 / 提交钩子 ——
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pre-commit>=4.0",
 ]
-# 向量召回依赖（三选一，按选的后端装）：
-#   chroma 模式      → pip install -e ".[vector-chroma]"
-#   chroma_http 模式 → pip install -e ".[vector-chroma]"（同包，HttpClient 内置）
-#   pgvector 模式    → pip install -e ".[vector-pgvector]"
-# 两个都装也行（通过 VECTOR_DB_BACKEND 配置切换）：
-#   pip install -e ".[vector-all]"
-vector-chroma = [
-    "chromadb>=0.5.0",            # Chroma 向量库（PersistentClient + HttpClient）
-]
-vector-pgvector = [
-    "psycopg2-binary>=2.9.9",     # PostgreSQL 驱动（pgvector 后端）
-]
-vector-all = [
-    "chromadb>=0.5.0",
-    "psycopg2-binary>=2.9.9",
+# 向量召回依赖（Milvus 单后端）：
+#   pip install -e ".[vector-milvus]"
+vector-milvus = [
+    "pymilvus>=2.4.0",            # Milvus 客户端（MilvusClient + HNSW/COSINE）
 ]
 
 [build-system]
@@ -61,3 +54,20 @@ include = ["app*"]
 
 [tool.setuptools.package-data]
 app = ["prompts/*.yaml"]
+
+# ===== §5.17 ruff：lint + format =====
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# E501 行宽交给 ruff format 处理，lint 不报
+ignore = ["E501"]
+
+# ===== §5.17 mypy：渐进式类型检查（第三方库无 stubs 时放宽） =====
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+no_implicit_optional = false

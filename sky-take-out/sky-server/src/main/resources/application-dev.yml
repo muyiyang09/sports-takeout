@@ -6,6 +6,13 @@ sky:
     database: sports_takeout
     username: root
     password: 123456
+  # ⚠️ 仅开发：以下 JWT/AES 为可被 git 追踪的弱默认，生产禁用（生产用 .env 注入 SKY_JWT_* / SKY_AES_KEY）
+  jwt:
+    admin-secret-key: dc3f6fb16b4fe31ff1e0910f67be2b108de44cd4ea55b76775d5a7b72ebe5409
+    user-secret-key: 89bac629749f27df08330116c1b562f64835be18528cb708f4a9c3bd7b99c62a
+    coach-secret-key: 2ccc1f422dccd7882cd6512a6d9dc7d6b1ec4f7f626715cb803d702409fb2f9c
+  encrypt:
+    aes-key: SportsTakeoutKey
   # 以下第三方密钥均为占位符，请替换为你自己的值，切勿提交真实密钥到仓库
   alioss:
     access-key-id: your-aliyun-access-key-id

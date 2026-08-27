@@ -6,12 +6,14 @@ import com.sky.entity.User;
 import com.sky.properties.JwtProperties;
 import com.sky.result.Result;
 import com.sky.service.UserService;
+import com.sky.service.TokenBlacklistService;
 import com.sky.utils.JwtUtil;
 import com.sky.vo.UserLoginVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.Operation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,6 +31,8 @@ public class UserController {
     private UserService userService;
     @Autowired
     private JwtProperties jwtProperties;
+    @Autowired
+    private TokenBlacklistService tokenBlacklistService;
 
     /**
      * 微信登录
@@ -43,12 +47,18 @@ public class UserController {
         //微信用户登录成功后，生成token
         Map<String, Object> claims = new HashMap<>();
         claims.put(JwtClaimsConstant.USER_ID, user.getId());
-        String token = JwtUtil.createJWT(jwtProperties.getUserSecretKey(), jwtProperties.getUserTtl(),claims);
+        JwtUtil.JwtTokenResult tokenResult = JwtUtil.createJWT(
+                jwtProperties.getUserSecretKey(), jwtProperties.getUserTtl(), claims);
+
+        tokenBlacklistService.registerUserToken(
+                String.valueOf(user.getId()),
+                tokenResult.getJti(),
+                jwtProperties.getUserTtl());
 
         UserLoginVO userLoginVO = UserLoginVO.builder()
                 .id(user.getId())
                 .openid(user.getOpenid())
-                .token(token)
+                .token(tokenResult.getToken())
                 .build();
         return Result.success(userLoginVO);
     }
@@ -59,6 +69,7 @@ public class UserController {
      * @return
      */
     @PostMapping("/mockLogin")
+    @Profile("!prod")
     @Operation(summary = "mock登录(开发用)")
     public Result<UserLoginVO> mockLogin(@RequestBody Map<String, String> body) {
         String phone = body.get("phone");
@@ -66,12 +77,18 @@ public class UserController {
         User user = userService.mockLogin(phone);
         Map<String, Object> claims = new HashMap<>();
         claims.put(JwtClaimsConstant.USER_ID, user.getId());
-        String token = JwtUtil.createJWT(jwtProperties.getUserSecretKey(), jwtProperties.getUserTtl(), claims);
+        JwtUtil.JwtTokenResult tokenResult = JwtUtil.createJWT(
+                jwtProperties.getUserSecretKey(), jwtProperties.getUserTtl(), claims);
+
+        tokenBlacklistService.registerUserToken(
+                String.valueOf(user.getId()),
+                tokenResult.getJti(),
+                jwtProperties.getUserTtl());
 
         UserLoginVO userLoginVO = UserLoginVO.builder()
                 .id(user.getId())
                 .openid(user.getOpenid())
-                .token(token)
+                .token(tokenResult.getToken())
                 .build();
         return Result.success(userLoginVO);
     }

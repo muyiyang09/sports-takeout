@@ -1,7 +1,10 @@
 package com.sky.controller.user;
 
+import com.sky.context.BaseContext;
 import com.sky.dto.OrdersPaymentDTO;
 import com.sky.dto.OrdersSubmitDTO;
+import com.sky.entity.Orders;
+import com.sky.exception.OrderBusinessException;
 import com.sky.result.PageResult;
 import com.sky.result.Result;
 import com.sky.service.OrderService;
@@ -76,6 +79,10 @@ public class OrderController {
     @GetMapping("/orderDetail/{id}")
     @Operation(summary = "查询订单详情")
     public Result<OrderVO> details(@PathVariable("id") Long id) {
+        Orders order = orderService.getById(id);
+        if (order == null || !order.getUserId().equals(BaseContext.getCurrentId())) {
+            throw new OrderBusinessException("无权查看该订单");
+        }
         OrderVO orderVO = orderService.details(id);
         return Result.success(orderVO);
     }
@@ -110,6 +117,10 @@ public class OrderController {
     @GetMapping("/reminder/{id}")
     @Operation(summary = "客户催单")
     public Result reminder(@PathVariable("id") Long id){
+        Orders order = orderService.getById(id);
+        if (order == null || !order.getUserId().equals(BaseContext.getCurrentId())) {
+            throw new OrderBusinessException("无权操作该订单");
+        }
         orderService.reminder(id);
         return Result.success();
     }

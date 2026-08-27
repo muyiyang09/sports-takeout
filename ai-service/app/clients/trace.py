@@ -15,18 +15,24 @@ import time
 from functools import wraps
 from typing import Awaitable, Callable
 
+from app.graphs.base import invoke_node
+
 logger = logging.getLogger("app.trace")
 
 
 def trace_node(name: str):
-    """节点级耗时装饰器。包装 async 节点，打一条耗时日志。"""
+    """节点级耗时装饰器。包装 async 节点，打一条耗时日志。
+
+    同时借 invoke_node 套 asyncio.wait_for 超时兜底（§6.30 死循环防护），
+    节点挂起/死循环会被强制终止而非无限占用 worker。
+    """
 
     def decorator(fn: Callable[..., Awaitable]) -> Callable[..., Awaitable]:
         @wraps(fn)
         async def wrapper(state):
             start = time.perf_counter()
             try:
-                return await fn(state)
+                return await invoke_node(fn, state)
             finally:
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 logger.info("[Trace] node=%s latency_ms=%.1f", name, elapsed_ms)

@@ -52,7 +52,7 @@ public class CoachController {
     @PostMapping("/coach/login")
     @Operation(summary = "教练登录")
     public Result<CoachLoginVO> login(@RequestBody CoachLoginDTO coachLoginDTO) {
-        log.info("教练登录：{}", coachLoginDTO);
+        log.info("教练登录：{}", coachLoginDTO.getPhone());
         CoachLoginVO coachLoginVO = coachService.login(coachLoginDTO);
         return Result.success(coachLoginVO);
     }

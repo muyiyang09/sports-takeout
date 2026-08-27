@@ -3,6 +3,7 @@ package com.sky.config;
 import com.sky.interceptor.JwtTokenAdminInterceptor;
 import com.sky.interceptor.JwtTokenCoachInterceptor;
 import com.sky.interceptor.JwtTokenUserInterceptor;
+import com.sky.interceptor.RateLimitInterceptor;
 import com.sky.json.JacksonObjectMapper;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
@@ -27,6 +28,8 @@ import java.util.List;
 public class WebMvcConfiguration implements WebMvcConfigurer {
 
     @Autowired
+    private RateLimitInterceptor rateLimitInterceptor;
+    @Autowired
     private JwtTokenAdminInterceptor jwtTokenAdminInterceptor;
     @Autowired
     private JwtTokenUserInterceptor jwtTokenUserInterceptor;
@@ -41,6 +44,18 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         log.info("开始注册自定义拦截器...");
+
+        // 限流拦截器 - 在 JWT 拦截器之后运行，排除健康检查、支付回调等路径
+        registry.addInterceptor(rateLimitInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns("/actuator/**")
+                .excludePathPatterns("/notify/**")
+                .excludePathPatterns("/upload/**")
+                .excludePathPatterns("/error")
+                .excludePathPatterns("/swagger-ui/**")
+                .excludePathPatterns("/v3/api-docs/**")
+                .order(10);
+
         registry.addInterceptor(jwtTokenAdminInterceptor)
                 .addPathPatterns("/admin/**")
                 .excludePathPatterns("/admin/employee/login");
@@ -66,8 +81,7 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
         registry.addInterceptor(jwtTokenCoachInterceptor)
                 .addPathPatterns("/coach/**")
                 .excludePathPatterns("/coach/coach/login")
-                .excludePathPatterns("/coach/coach/register")
-                .excludePathPatterns("/coach/common/upload");
+                .excludePathPatterns("/coach/coach/register");
     }
 
     /**

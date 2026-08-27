@@ -20,8 +20,8 @@ import com.sky.result.PageResult;
 import com.sky.service.EmployeeService;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.util.DigestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -31,6 +31,9 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     @Autowired
     private EmployeeMapper employeeMapper;
+
+    /** 密码哈希：BCrypt（无盐 MD5 已弃用，见 §5.5 安全审查） */
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     /**
      * 员工登录
@@ -51,11 +54,8 @@ public class EmployeeServiceImpl implements EmployeeService {
             throw new AccountNotFoundException(MessageConstant.ACCOUNT_NOT_FOUND);
         }
 
-        //密码比对
-        // TODO 后期需要进行md5加密，然后再进行比对
-
-        password = DigestUtils.md5DigestAsHex(password.getBytes());
-        if (!password.equals(employee.getPassword())) {
+        //密码比对（BCrypt matches：库中存哈希，输入原始密码比对）
+        if (!passwordEncoder.matches(password, employee.getPassword())) {
             //密码错误
             throw new PasswordErrorException(MessageConstant.PASSWORD_ERROR);
         }
@@ -75,7 +75,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         Employee employee = new Employee();
         BeanUtils.copyProperties(employeeDTO, employee);  //   把dto对象中的属性复制到实体对象中
         employee.setStatus(StatusConstant.ENABLE);   //   设置默认状态为启用
-        employee.setPassword(DigestUtils.md5DigestAsHex(PasswordConstant.DEFAULT_PASSWORD.getBytes())); //   设置默认密码
+        employee.setPassword(passwordEncoder.encode(PasswordConstant.DEFAULT_PASSWORD)); //   设置默认密码(BCrypt)
         //公共属性不需要设置,aop 会自动填充
 //        employee.setUpdateTime(LocalDateTime.now());
 //        employee.setCreateTime(LocalDateTime.now());
@@ -138,20 +138,16 @@ public class EmployeeServiceImpl implements EmployeeService {
         }
         // H获取当前用户的id
         Long empId = BaseContext.getCurrentId();
-        // 2.获取用户输入加密后的新旧密码
-        String oldPassword = DigestUtils.md5DigestAsHex(passwordEditDTO.getOldPassword().getBytes());
-        String newPassword = DigestUtils.md5DigestAsHex(passwordEditDTO.getNewPassword().getBytes());
-        // 封装对象
-        passwordEditDTO.setNewPassword(newPassword);
-        passwordEditDTO.setOldPassword(oldPassword);
-        passwordEditDTO.setEmpId(empId);
         // 3.根据id查询原始密码
         Employee employee = employeeMapper.selectByPrimaryKey(empId);
-        // 4.判断原始密码是否正确
-        if (!employee.getPassword().equals(oldPassword)) {
+        // 4.校验旧密码（BCrypt matches 原始输入 vs 库中哈希）
+        if (!passwordEncoder.matches(passwordEditDTO.getOldPassword(), employee.getPassword())) {
             throw new PasswordErrorException(MessageConstant.OLDPASSWORD_ERROR);
         }
-        // 5.密码格式正确，修改数据库中密码
+        // 5.新密码 BCrypt 编码；oldPassword 传库中哈希作为 update 的 where 条件
+        passwordEditDTO.setNewPassword(passwordEncoder.encode(passwordEditDTO.getNewPassword()));
+        passwordEditDTO.setOldPassword(employee.getPassword());
+        passwordEditDTO.setEmpId(empId);
         employeeMapper.updatePassword(passwordEditDTO);
     }
 

@@ -26,11 +26,12 @@
 ## 核心亮点
 
 - **🤖 多 Agent 架构**：教练推荐 Agent + 评价摘要 Agent + 证书审核 Agent + Supervisor 调度
-- **🔍 混合检索 RAG**：BM25 稀疏检索 + 向量召回 + RRF 融合，支持 Chroma/pgvector 双后端切换
+- **🔍 混合检索 RAG**：BM25 稀疏检索 + 向量召回（Milvus/Chroma/pgvector）+ RRF 融合
 - **🔄 Loop 工程**：条件分支路由、失败重试循环、HITL 人工介入、自我反思
 - **🛡️ 工程化加固**：分布式锁防死锁、Checkpointer 状态持久化、限流熔断、Token 预算管控
+- **🔐 安全加固**：三端 JWT 隔离 + 服务间共享密钥鉴权、越权校验全覆盖、支付幂等、AES-GCM 敏感数据加密、缓存穿透/击穿/雪崩三防、RBAC 角色切面、操作审计表
 - **🔌 MCP 工具层**：跨语言工具复用，Spring Boot 业务接口暴露为 MCP Tool 供 AI 调用
-- **📊 可观测性**：审计日志、Metrics 指标、Trace 链路追踪、Prompt 版本管理
+- **📊 可观测性**：审计日志、Prometheus/Grafana/Alertmanager 全套指标告警、Trace 链路追踪
 - **🏗️ 双派单模型**：指定教练 + 抢单池两种派单模式，完整状态机覆盖全流程
 
 ## 系统架构
@@ -138,12 +139,16 @@ docker-compose up -d
 
 启动后访问：
 
-| 服务 | 地址 |
-|------|------|
-| 管理端前端 | http://localhost:5173 |
-| Spring Boot API | http://localhost:8080 |
-| AI 微服务 | http://localhost:18000 |
-| AI 接口文档 | http://localhost:18000/docs |
+| 服务 | 地址 | 说明 |
+|------|------|------|
+| 管理端前端 | http://localhost:5173 | Vue3 管理后台 |
+| Spring Boot API | http://localhost:8080 | Knife4j 文档：/doc.html |
+| AI 微服务 | http://127.0.0.1:18000 | 仅本机可达，需 x-service-token 鉴权 |
+| Milvus | localhost:19530 | 向量库（etcd+minio 三服务栈） |
+| Prometheus / Grafana | :9090 / :3000 | 指标采集与可视化面板 |
+| Alertmanager | :9093 | 告警路由（钉钉/飞书 webhook） |
+
+> ⚠️ `.env` 中以下变量为必填（缺失则 compose 启动报错）：`MYSQL_ROOT_PASSWORD`、`MYSQL_APP_PASSWORD`、`REDIS_PASSWORD`、`MILVUS_MINIO_ACCESS_KEY`、`MILVUS_MINIO_SECRET_KEY`。安全基线详见 [DEPLOY.md](DEPLOY.md)。
 
 ### AI 微服务本地开发
 
@@ -166,17 +171,21 @@ pytest tests/ -v
 
 ### API 接口
 
+> 业务接口统一前缀 `/v1/ai`，需携带 `x-service-token` 请求头（与后端共享的 `SERVICE_AUTH_TOKEN`）。
+
 | Method | Path | 说明 |
 |--------|------|------|
 | GET | `/healthz` | 健康检查 |
 | GET | `/readyz` | 就绪探针（含依赖检查） |
-| POST | `/ai/recommend-coach` | 教练智能推荐 |
-| POST | `/ai/review-summary` | 评价摘要生成 |
-| POST | `/ai/cert-review` | 证书智能审核 |
+| POST | `/v1/ai/recommend-coach` | 教练智能推荐 |
+| POST | `/v1/ai/review-summary` | 评价摘要生成 |
+| POST | `/v1/ai/cert-review` | 证书智能审核 |
+| POST | `/v1/ai/feedback` | 用户反馈回流（点赞/点踩/下单） |
 
 **推荐请求示例：**
 ```json
-POST /ai/recommend-coach
+POST /v1/ai/recommend-coach
+Headers: x-service-token: <SERVICE_AUTH_TOKEN>
 {
   "user_query": "望京，预算200以内，想产后恢复，周末上午",
   "city_code_override": null,
@@ -212,8 +221,15 @@ sports-takeout/
 ├── LICENSE                        # 非商业使用许可
 ├── PRD.md                         # 产品需求文档
 ├── DEPLOY.md                      # 部署指南
-├── docker-compose.yml             # Docker 一键部署编排
+├── docker-compose.yml             # Docker 一键部署编排（含 Milvus 栈 + 可观测栈）
 ├── .env.example                   # 环境变量模板
+├── scripts/
+│   ├── smoke_test.sh              # 端到端冒烟测试
+│   └── backup_mysql.sh            # MySQL 每日备份
+├── prometheus/                    # Prometheus 采集配置 + Alertmanager 告警路由
+├── sql/
+│   ├── sports_take_out.sql        # 业务库建表 + 种子数据
+│   └── 07-idempotency-indexes.sql # 幂等唯一索引 + 应用账号授权
 │
 ├── ai-service/                    # AI 微服务（核心）
 │   ├── app/
@@ -270,7 +286,7 @@ sports-takeout/
 | Redis (python) | 7.4.1 | 缓存/Checkpointer |
 | langgraph-checkpoint-redis | 0.5.2 | 生产级状态持久化 |
 | rank-bm25 | 0.2.2 | 稀疏检索 |
-| Chroma / pgvector | - | 向量存储 |
+| Milvus 2.4 / Chroma / pgvector | - | 向量存储（环境变量切换后端） |
 
 ### 前端
 
@@ -281,6 +297,25 @@ sports-takeout/
 
 ## 配置说明
 
+### 根目录 .env（docker-compose 部署）
+
+```env
+# ===== 必填：缺失 compose 启动即报错 =====
+MYSQL_ROOT_PASSWORD=          # MySQL root（仅初始化用）
+MYSQL_APP_PASSWORD=           # 应用账号 sports_app 密码（业务连接用）
+REDIS_PASSWORD=               # Redis requirepass
+MILVUS_MINIO_ACCESS_KEY=      # Milvus 内部对象存储凭据（禁用默认 minioadmin）
+MILVUS_MINIO_SECRET_KEY=
+
+# ===== 强烈建议填写 =====
+SKY_JWT_ADMIN_KEY=            # 三端 JWT 密钥（openssl rand -hex 32）
+SKY_JWT_USER_KEY=
+SKY_JWT_COACH_KEY=
+SKY_AES_KEY=                  # 身份证号 AES-GCM 加密密钥（16/24/32 字节）
+SERVICE_AUTH_TOKEN=           # 后端 ↔ ai-service 机器间鉴权共享密钥
+LLM_API_KEY=                  # DeepSeek 等 LLM Key
+```
+
 ### AI 微服务核心配置
 
 ```env
@@ -290,27 +325,16 @@ LLM_API_KEY=your-api-key
 LLM_BASE_URL=
 
 # ===== 数据库（只读现有库） =====
-MYSQL_HOST=127.0.0.1
-MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=your-password
-MYSQL_DATABASE=sports_takeout
-
-# ===== Redis（缓存 + Checkpointer） =====
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-REDIS_DB=1
+MYSQL_HOST=mysql
+MYSQL_USER=sports_app         # 生产禁用 root，走最小权限应用账号
+REDIS_PASSWORD=                # 与根目录 REDIS_PASSWORD 一致
 
 # ===== 向量库后端选择 =====
-# chroma（开发）/ chroma_http（过渡）/ pgvector（生产首选）
-VECTOR_DB_BACKEND=chroma
+# milvus（容器部署默认）/ chroma（开发）/ pgvector（生产可选）
+MILVUS_URI=http://milvus:19530
 
 # ===== 功能开关 =====
-HYBRID_RETRIEVAL_ENABLED=true
-RERANKER_ENABLED=false
-CHECKPOINTER_BACKEND=memory   # memory(开发) / redis(生产)
-REVIEW_SUMMARY_ENABLED=true
-CERT_REVIEW_ENABLED=true
+CHECKPOINTER_BACKEND=redis    # SERVICE_ENV=prod 时默认 redis；memory 仅限开发
 ```
 
 详细配置项见 [ai-service/.env.example](ai-service/.env.example)。
@@ -346,8 +370,9 @@ stateDiagram-v2
     待付款 --> 待接单: 支付成功(模拟)
     待接单 --> 待服务: 指定单·教练确认 / 抢单池·抢单成功
     待接单 --> 已拒单: 教练拒绝(指定单)
-    待接单 --> 已取消: 用户取消 / 派单超时
-    待付款 --> 已取消: 用户取消
+    待接单 --> 退款中: 用户申请退款(已付订单不支持直接取消)
+    待接单 --> 已取消: 派单超时
+    待付款 --> 已取消: 用户取消(无损)
     待服务 --> 服务中: 教练开始服务
     服务中 --> 已完成: 教练完成服务
     已完成 --> 已评价: 用户评价(教练+课程)
@@ -377,6 +402,8 @@ stateDiagram-v2
 | **真实微信支付** | 需自行申请微信支付商户号，在 `application.yml` 配置 `appid/mchid/apiV3Key/证书路径`，并替换 `OrderServiceImpl.payment()` 中的模拟调用为 `WeChatPayUtil.pay()` |
 
 > 代码已集成微信支付 SDK（`WeChatPayUtil`），切换到真实支付只需配置商户号 + 打开注释，无需重写。
+>
+> 💰 资金规则：已付款订单不支持直接取消（防止"钱收了单没了"），必须走申请退款流程；待付款订单可无损取消。支付回调带验签与幂等短路。
 
 ## 品牌定制说明
 
@@ -593,12 +620,16 @@ docker-compose up -d
 
 After startup, access:
 
-| Service | URL |
-|---------|-----|
-| Admin Web | http://localhost:5173 |
-| Spring Boot API | http://localhost:8080 |
-| AI Microservice | http://localhost:18000 |
-| AI API Docs | http://localhost:18000/docs |
+| Service | URL | Notes |
+|---------|-----|-------|
+| Admin Web | http://localhost:5173 | Vue3 admin console |
+| Spring Boot API | http://localhost:8080 | Knife4j docs: /doc.html |
+| AI Microservice | http://127.0.0.1:18000 | Local-only, requires x-service-token |
+| Milvus | localhost:19530 | Vector DB (etcd + minio stack) |
+| Prometheus / Grafana | :9090 / :3000 | Metrics & dashboards |
+| Alertmanager | :9093 | Alert routing (DingTalk/Feishu webhook) |
+
+> ⚠️ Required `.env` variables (compose fails without them): `MYSQL_ROOT_PASSWORD`, `MYSQL_APP_PASSWORD`, `REDIS_PASSWORD`, `MILVUS_MINIO_ACCESS_KEY`, `MILVUS_MINIO_SECRET_KEY`. See [DEPLOY.md](DEPLOY.md) for the security baseline.
 
 ### AI Microservice Local Development
 
@@ -625,13 +656,17 @@ pytest tests/ -v
 |--------|------|-------------|
 | GET | `/healthz` | Health check |
 | GET | `/readyz` | Readiness probe (with dependency checks) |
-| POST | `/ai/recommend-coach` | Intelligent coach recommendation |
-| POST | `/ai/review-summary` | Review summary generation |
-| POST | `/ai/cert-review` | Intelligent certificate verification |
+| POST | `/v1/ai/recommend-coach` | Intelligent coach recommendation |
+| POST | `/v1/ai/review-summary` | Review summary generation |
+| POST | `/v1/ai/cert-review` | Intelligent certificate verification |
+| POST | `/v1/ai/feedback` | User feedback loop (like/dislike/order) |
+
+> All business endpoints require the `x-service-token` header (shared `SERVICE_AUTH_TOKEN`).
 
 **Recommendation Request:**
 ```json
-POST /ai/recommend-coach
+POST /v1/ai/recommend-coach
+Headers: x-service-token: <SERVICE_AUTH_TOKEN>
 {
   "user_query": "Wangjing, budget under 200, postpartum recovery, weekend mornings",
   "city_code_override": null,
@@ -725,7 +760,7 @@ sports-takeout/
 | Redis (python) | 7.4.1 | Cache / Checkpointer |
 | langgraph-checkpoint-redis | 0.5.2 | Production state persistence |
 | rank-bm25 | 0.2.2 | Sparse retrieval |
-| Chroma / pgvector | - | Vector storage |
+| Milvus 2.4 / Chroma / pgvector | - | Vector storage (switchable backend) |
 
 ### Frontend
 
@@ -736,36 +771,39 @@ sports-takeout/
 
 ## Configuration
 
+### Root .env (docker-compose deployment)
+
+```env
+# ===== Required: compose fails without these =====
+MYSQL_ROOT_PASSWORD=          # MySQL root (init only)
+MYSQL_APP_PASSWORD=           # App account sports_app password
+REDIS_PASSWORD=               # Redis requirepass
+MILVUS_MINIO_ACCESS_KEY=      # Milvus internal object storage creds
+MILVUS_MINIO_SECRET_KEY=
+
+# ===== Strongly recommended =====
+SKY_JWT_ADMIN_KEY=            # JWT keys for three ends (openssl rand -hex 32)
+SKY_JWT_USER_KEY=
+SKY_JWT_COACH_KEY=
+SKY_AES_KEY=                  # AES-GCM key for ID encryption (16/24/32 bytes)
+SERVICE_AUTH_TOKEN=           # Shared secret between backend and ai-service
+LLM_API_KEY=                  # DeepSeek etc.
+```
+
 ### AI Microservice Core Config
 
 ```env
-# ===== LLM Configuration =====
 LLM_MODEL=deepseek/deepseek-chat
 LLM_API_KEY=your-api-key
-LLM_BASE_URL=
 
-# ===== Database (read-only access) =====
-MYSQL_HOST=127.0.0.1
-MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=your-password
-MYSQL_DATABASE=sports_takeout
+MYSQL_HOST=mysql
+MYSQL_USER=sports_app         # production forbids root; least-privilege app account
+REDIS_PASSWORD=
 
-# ===== Redis (Cache + Checkpointer) =====
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-REDIS_DB=1
+# Vector backend: milvus (container default) / chroma (dev) / pgvector
+MILVUS_URI=http://milvus:19530
 
-# ===== Vector Store Backend =====
-# chroma (dev) / chroma_http (transition) / pgvector (production recommended)
-VECTOR_DB_BACKEND=chroma
-
-# ===== Feature Toggles =====
-HYBRID_RETRIEVAL_ENABLED=true
-RERANKER_ENABLED=false
-CHECKPOINTER_BACKEND=memory   # memory(dev) / redis(production)
-REVIEW_SUMMARY_ENABLED=true
-CERT_REVIEW_ENABLED=true
+CHECKPOINTER_BACKEND=redis    # defaults to redis when SERVICE_ENV=prod; memory is dev-only
 ```
 
 See [ai-service/.env.example](ai-service/.env.example) for all configuration options.
@@ -801,8 +839,9 @@ stateDiagram-v2
     Unpaid --> Pending: Payment success
     Pending --> Scheduled: Coach confirmed / Dispatch claimed
     Pending --> Rejected: Coach declined
-    Pending --> Cancelled: User cancelled / Dispatch timeout
-    Unpaid --> Cancelled: User cancelled
+    Pending --> Refunding: Refund requested (paid orders cannot be cancelled directly)
+    Pending --> Cancelled: Dispatch timeout
+    Unpaid --> Cancelled: User cancelled (no loss)
     Scheduled --> InService: Coach started service
     InService --> Completed: Coach finished service
     Completed --> Reviewed: User reviewed (coach + course)
@@ -832,6 +871,8 @@ Full schema: `sql/sports_take_out.sql` (with seed data).
 | **Real WeChat Pay** | Apply for merchant ID, configure `appid/mchid/apiV3Key/cert` in `application.yml`, replace mock call with `WeChatPayUtil.pay()` |
 
 > WeChat Pay SDK (`WeChatPayUtil`) is already integrated. Switching to real payment only requires configuration — no code rewrite needed.
+>
+> 💰 Funds policy: paid orders cannot be cancelled directly (must go through the refund flow); unpaid orders can be cancelled without loss. Payment callbacks carry signature verification and idempotency guards.
 
 ## Brand Customization
 

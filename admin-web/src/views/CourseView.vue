@@ -84,10 +84,10 @@
     </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import api from '../api.js';
+import api from '../api';
 
 const list = ref([]);
 const categories = ref([]);

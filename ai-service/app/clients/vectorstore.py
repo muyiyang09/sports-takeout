@@ -1,25 +1,21 @@
-"""向量存储客户端（#04 向量路，三后端可切换）。
+"""向量存储客户端（#04 向量路，Milvus 单后端）。
 
-后端选择（通过 settings.vector_db_backend 配置）：
-  - **chroma**（默认，开发）：Chroma PersistentClient，本地文件存储，零运维
-  - **chroma_http**（过渡）：Chroma HttpClient，Docker 独立部署，多副本共享
-  - **pgvector**（生产首选）：PostgreSQL + pgvector 扩展，HA + 主从复制 + 成熟运维
+后端：Milvus（生产唯一）。pymilvus 未安装 / Milvus 不可达时，向量召回降级为空，
+主链路自动退回 BM25 单路兜底（见 hybrid.py）。
 
-为什么 pgvector 是生产首选：
-  - 多副本共享（PostgreSQL 原生网络访问，不像 PersistentClient 是本地文件）
-  - HA（主从复制 + 自动 failover）
-  - 事务一致性（向量数据和业务数据可同库，插入原子性）
-  - HNSW 索引（pgvector 0.5+，ms 级查询）
-  - 运维工具链成熟（pg_dump / Prometheus / Grafana）
+为什么选 Milvus：
+  - 分布式 + HA（多节点 + 副本，原生网络访问，无本地文件痛点）；
+  - HNSW + COSINE 索引，ms 级语义召回；
+  - 多副本共享同一实例（K8s/云原生友好），支撑 AI 服务多副本部署；
+  - 运维工具链成熟（Attu / Prometheus / Grafana exporter）。
 
 设计要点：
-  - 惰性初始化：首次访问才建连接 / 建表，不拖慢启动；
+  - 惰性初始化：首次访问才建连接 / 建 collection，不拖慢启动；
   - 失败即降级：任何异常都返回 [] / 0，不抛给主链路（BM25 单路兜底）；
-  - 统一接口：三种后端对外暴露相同的 upsert / search 语义（适配器模式）。
+  - 统一接口：对外暴露 upsert / query 语义，上层不感知 Milvus 细节。
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -34,154 +30,91 @@ _available: bool | None = None  # None=未探测；探测后缓存
 
 
 # =============================================================================
-# 后端适配器（鸭子类型：都实现 upsert / query 两个方法）
+# 后端适配器（鸭子类型：实现 upsert / query 两个方法）
 # =============================================================================
 
-class _ChromaBackend:
-    """Chroma PersistentClient（本地文件，开发用）。"""
+class _MilvusBackend:
+    """Milvus 后端（生产唯一）。
 
-    def __init__(self):
-        import chromadb  # type: ignore
-        client = chromadb.PersistentClient(path=settings.vector_db_path)
-        self._store = client.get_or_create_collection(
-            name="coach_bio",
-            metadata={"hnsw:space": "cosine"},
-        )
-        logger.info("[VectorStore] Chroma PersistentClient 就绪，path=%s", settings.vector_db_path)
-
-    def upsert(self, ids: list[str], embeddings: list, documents: list[str], metadatas: list[dict]):
-        self._store.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
-
-    def query(self, query_embeddings: list, n_results: int) -> dict:
-        """返回 Chroma 风格结构：{ids, distances, metadatas}"""
-        return self._store.query(query_embeddings=query_embeddings, n_results=n_results)
-
-
-class _ChromaHttpBackend:
-    """Chroma HttpClient（Docker 独立部署，过渡方案）。
-
-    多副本可共享同一 Chroma 实例，但仍非 HA（单节点）。
-    生产最终应迁到 pgvector。
+    用 pymilvus MilvusClient（2.4+）同步 API；调用处仍在 async 主链路里，
+    与 db.py 的同步访问模式一致，不引入 async 驱动。
+    Collection schema：id(varchar pk) / embedding(float_vector) / document(varchar) / metadata(json)
+    索引：HNSW + COSINE，ms 级语义召回。
     """
 
     def __init__(self):
-        import chromadb  # type: ignore
-        # host:port 从 vector_db_path 解析（格式 "host:port"），或用默认
-        parts = settings.vector_db_path.split(":") if ":" in settings.vector_db_path else ["localhost", "8000"]
-        host = parts[0] if parts else "localhost"
-        port = int(parts[1]) if len(parts) > 1 else 8000
-        client = chromadb.HttpClient(host=host, port=port)
-        self._store = client.get_or_create_collection(
-            name="coach_bio",
-            metadata={"hnsw:space": "cosine"},
+        from pymilvus import MilvusClient, DataType  # type: ignore
+        self._MilvusClient = MilvusClient
+        self._DataType = DataType
+        self._client = MilvusClient(
+            uri=settings.milvus_uri,
+            token=settings.milvus_token or "",
+            db_name=settings.milvus_database,
         )
-        logger.info("[VectorStore] Chroma HttpClient 就绪，host=%s port=%d", host, port)
-
-    def upsert(self, ids, embeddings, documents, metadatas):
-        self._store.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
-
-    def query(self, query_embeddings, n_results) -> dict:
-        return self._store.query(query_embeddings=query_embeddings, n_results=n_results)
-
-
-class _PgvectorBackend:
-    """pgvector 后端（PostgreSQL + pgvector 扩展，生产首选）。
-
-    用 psycopg2 同步驱动 + asyncio.to_thread 包装（与 db.py 的 MySQL 访问模式一致），
-    不引入 asyncpg 新驱动，降低依赖复杂度。
-    """
-
-    def __init__(self):
-        import psycopg2  # type: ignore
-        # 构建连接字符串
-        dsn = (
-            f"host={settings.pgvector_host} port={settings.pgvector_port} "
-            f"user={settings.pgvector_user} password={settings.pgvector_password} "
-            f"dbname={settings.pgvector_database}"
-        )
-        self._conn_factory = lambda: psycopg2.connect(dsn)
-        self._table = settings.pgvector_table
-        self._dim = settings.pgvector_dim
-
-        # 建表 + 建索引（幂等）
-        self._ensure_schema()
+        self._collection = settings.milvus_collection
+        self._dim = settings.milvus_dim
+        self._ensure_collection()
         logger.info(
-            "[VectorStore] pgvector 就绪，host=%s db=%s table=%s dim=%d",
-            settings.pgvector_host, settings.pgvector_database, self._table, self._dim,
+            "[VectorStore] Milvus 就绪，uri=%s collection=%s dim=%d",
+            settings.milvus_uri, self._collection, self._dim,
         )
 
-    def _ensure_schema(self):
-        """建表 + 扩展 + HNSW 索引（幂等）。"""
-        with self._conn_factory() as conn, conn.cursor() as cur:
-            # 1. 装 pgvector 扩展
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            # 2. 建表
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self._table} (
-                    id         TEXT PRIMARY KEY,
-                    embedding  vector({self._dim}),
-                    document   TEXT,
-                    metadata   JSONB,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            # 3. 建 HNSW 索引（cosine 距离）
-            cur.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{self._table}_embedding
-                ON {self._table} USING hnsw (embedding vector_cosine_ops)
-                WITH (m = 16, ef_construction = 64)
-            """)
-            conn.commit()
+    def _ensure_collection(self):
+        """幂等：建 collection + HNSW 索引 + load。"""
+        if self._client.has_collection(self._collection):
+            self._client.load_collection(self._collection)
+            return
+        schema = self._MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", self._DataType.VARCHAR, max_length=64, is_primary=True)
+        schema.add_field("embedding", self._DataType.FLOAT_VECTOR, dim=self._dim)
+        schema.add_field("document", self._DataType.VARCHAR, max_length=65535)
+        schema.add_field("metadata", self._DataType.JSON)
+        index_params = self._MilvusClient.prepare_index_params()
+        index_params.add_index(
+            field_name="embedding",
+            index_type="HNSW",
+            metric_type="COSINE",
+            params={"M": 16, "efConstruction": 64},
+        )
+        self._client.create_collection(
+            collection_name=self._collection,
+            schema=schema,
+            index_params=index_params,
+        )
+        self._client.load_collection(self._collection)
 
     def upsert(self, ids: list[str], embeddings: list, documents: list[str], metadatas: list[dict]):
-        """批量 upsert（ON CONFLICT 更新）。"""
-        # pgvector 的 vector 字面量格式：'[0.1,0.2,...]'
-        rows = []
-        for i, cid in enumerate(ids):
-            vec_str = "[" + ",".join(str(float(x)) for x in embeddings[i]) + "]"
-            rows.append((cid, vec_str, documents[i], json.dumps(metadatas[i], ensure_ascii=False)))
-
-        with self._conn_factory() as conn, conn.cursor() as cur:
-            # executemany 批量 upsert
-            cur.executemany(
-                f"""
-                INSERT INTO {self._table} (id, embedding, document, metadata)
-                VALUES (%s, %s::vector, %s, %s::jsonb)
-                ON CONFLICT (id) DO UPDATE SET
-                    embedding = EXCLUDED.embedding,
-                    document = EXCLUDED.document,
-                    metadata = EXCLUDED.metadata,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                rows,
-            )
-            conn.commit()
+        """批量 upsert（按主键 id 覆盖）。"""
+        data = [
+            {
+                "id": ids[i],
+                "embedding": list(embeddings[i]),
+                "document": documents[i],
+                "metadata": metadatas[i],
+            }
+            for i in range(len(ids))
+        ]
+        self._client.upsert(collection_name=self._collection, data=data)
 
     def query(self, query_embeddings: list, n_results: int) -> dict:
-        """向量近邻查询，返回 Chroma 风格结构。
+        """向量近邻查询。返回统一 batch 结构 {ids:[[...]], metadatas:[[...]], distances:[[...]]}。
 
-        用 <=> 操作符（cosine distance），返回格式与 Chroma 对齐：
-        {ids: [[...]], distances: [[...]], metadatas: [[...]]}
+        Milvus COSINE metric 返回的 distance 实际是相似度 score（越大越相似），
+        这里转成 cosine distance（1 - score），保持上层 sims = 1 - dist 的 round-trip 一致。
         """
-        # pgvector 查询：单条 query 向量
-        vec_str = "[" + ",".join(str(float(x)) for x in query_embeddings[0]) + "]"
-        with self._conn_factory() as conn, conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT id, metadata, embedding <=> %s::vector AS distance
-                FROM {self._table}
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s
-                """,
-                (vec_str, vec_str, n_results),
-            )
-            rows = cur.fetchall()
-
-        # 转成 Chroma 风格结构（外层是 batch 维度，这里只有 1 个 query）
-        ids = [[r[0] for r in rows]]
-        metadatas = [[json.loads(r[1]) if r[1] else {} for r in rows]]
-        distances = [[float(r[2]) for r in rows]]
-        return {"ids": ids, "metadatas": metadatas, "distances": distances}
+        q = list(query_embeddings[0])
+        res = self._client.search(
+            collection_name=self._collection,
+            data=[q],
+            limit=n_results,
+            search_params={"metric_type": "COSINE", "params": {"ef": 64}},
+            output_fields=["metadata"],
+        )
+        hits = res[0] if res else []
+        ids = [str(h.get("id")) for h in hits]
+        metadatas = [h.get("entity", {}).get("metadata") or {} for h in hits]
+        distances = [1.0 - float(h.get("distance", 0.0)) for h in hits]
+        return {"ids": [ids], "metadatas": [metadatas], "distances": [distances]}
 
 
 # =============================================================================
@@ -192,17 +125,12 @@ def _check_available() -> bool:
     """探测后端依赖是否可用。结果缓存，缺失只告警一次。"""
     global _available
     if _available is None:
-        backend = settings.vector_db_backend
         try:
-            if backend == "pgvector":
-                import psycopg2  # noqa: F401
-            else:
-                import chromadb  # noqa: F401
+            import pymilvus  # noqa: F401
             _available = True
         except ImportError as exc:
             logger.warning(
-                "[VectorStore] 后端 %s 依赖未安装，向量召回降级为 BM25 单路：%s",
-                backend, exc,
+                "[VectorStore] pymilvus 未安装，向量召回降级为 BM25 单路：%s", exc,
             )
             _available = False
     return _available
@@ -212,13 +140,7 @@ def _get_backend():
     """惰性获取后端实例。依赖缺失 / 初始化失败时抛 RuntimeError（上层降级）。"""
     global _backend
     if _backend is None:
-        backend = settings.vector_db_backend
-        if backend == "pgvector":
-            _backend = _PgvectorBackend()
-        elif backend == "chroma_http":
-            _backend = _ChromaHttpBackend()
-        else:
-            _backend = _ChromaBackend()
+        _backend = _MilvusBackend()
     return _backend
 
 
@@ -245,7 +167,7 @@ def upsert_coaches(coaches: list[dict[str, Any]]) -> int:
             documents=texts,
             metadatas=[{"coach_id": c["coach_id"]} for c in coaches],
         )
-        logger.info("[VectorStore] upsert %d 教练向量（后端=%s）", len(coaches), settings.vector_db_backend)
+        logger.info("[VectorStore] upsert %d 教练向量（后端=milvus）", len(coaches))
         return len(coaches)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[VectorStore] upsert 失败，跳过：%s", exc)

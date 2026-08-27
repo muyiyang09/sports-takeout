@@ -11,11 +11,13 @@ services:
     image: mysql:8.0
     container_name: sports-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
       MYSQL_DATABASE: sports_takeout
+      MYSQL_USER: ${MYSQL_APP_USER:-sports_app}
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?required}
       TZ: Asia/Shanghai
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"   # 仅本机调试，不对外暴露（§6.17）
     volumes:
       - mysql_data:/var/lib/mysql
       - ./sql/sports_take_out.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
@@ -24,6 +26,7 @@ services:
       - ./ai-service/sql/ai_session_state.sql:/docker-entrypoint-initdb.d/04-ai-session-state.sql:ro
       - ./ai-service/sql/coach_review.sql:/docker-entrypoint-initdb.d/05-coach-review.sql:ro
       - ./ai-service/sql/coach_certificate.sql:/docker-entrypoint-initdb.d/06-coach-certificate.sql:ro
+      - ./sql/07-idempotency-indexes.sql:/docker-entrypoint-initdb.d/07-idempotency.sql:ro
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
@@ -36,12 +39,12 @@ services:
     image: redis:7-alpine
     container_name: sports-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"   # 仅本机调试，不对外暴露（§6.37）
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?required}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -62,12 +65,17 @@ services:
       SKY_DATASOURCE_HOST: mysql
       SKY_DATASOURCE_PORT: 3306
       SKY_DATASOURCE_DATABASE: sports_takeout
-      SKY_DATASOURCE_USERNAME: root
-      SKY_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      SKY_DATASOURCE_USERNAME: ${MYSQL_APP_USER:-sports_app}
+      SKY_DATASOURCE_PASSWORD: ${MYSQL_APP_PASSWORD:?required}
       SKY_REDIS_HOST: redis
       SKY_REDIS_PORT: 6379
+      SKY_REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
+      TZ: Asia/Shanghai
+      SKY_AI_BASE_URL: http://ai-service:18000     # 后端 → ai-service 容器间调用
+      SKY_AI_SERVICE_TOKEN: ${SERVICE_AUTH_TOKEN:-} # 与 ai-service 同一共享密钥（后端侧变量名）
     ports:
       - "8080:8080"
+    stop_grace_period: 35s      # 配合 graceful shutdown，30s 内处理完存量请求再退（§6.12）
     restart: unless-stopped
 
   admin-web:
@@ -76,7 +84,8 @@ services:
       dockerfile: Dockerfile
     container_name: sports-admin-web
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "5173:80"
     restart: unless-stopped
@@ -92,6 +101,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      milvus:
+        condition: service_started
     environment:
       LLM_MODEL: ${LLM_MODEL:-deepseek/deepseek-chat}
       LLM_API_KEY: ${LLM_API_KEY:-}
@@ -99,20 +110,150 @@ services:
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_DATABASE: sports_takeout
-      MYSQL_USER: root
-      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_USER: ${MYSQL_APP_USER:-sports_app}
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?required}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
       REDIS_DB: 1
       SERVICE_ENV: prod
+      TZ: Asia/Shanghai
+      SERVICE_AUTH_TOKEN: ${SERVICE_AUTH_TOKEN:-}     # 与 backend 注入同一 token，做机器间鉴权
       CHECKPOINTER_BACKEND: redis
       CHECKPOINT_TTL_MINUTES: 60
       CHECKPOINT_DB_FALLBACK: "true"
+      # —— Milvus 向量召回（容器间走 http://milvus:19530；milvus 不可达时自动降级 BM25 单路）——
+      MILVUS_URI: http://milvus:19530
+      MILVUS_TOKEN: ${MILVUS_TOKEN:-}
+      MILVUS_DATABASE: default
+      MILVUS_COLLECTION: ai_vector_coach
+      MILVUS_DIM: 1024
     ports:
-      - "18000:18000"
+      - "127.0.0.1:18000:18000"    # 只允许宿主机本机访问，不对公网暴露（§6.13 内网隔离）
     restart: unless-stopped
     # 水平扩容：docker compose up --scale ai-service=3（限流/缓存/审计都基于 Redis，多副本天然一致）
+
+  # ===== Milvus 向量库栈（AI 向量召回，参考官方 standalone 编排）=====
+  # 三服务：etcd（元数据）+ minio（对象存储）+ milvus（向量引擎），数据落三个命名卷
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: sports-milvus-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  milvus-minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: sports-milvus-minio
+    environment:
+      MINIO_ACCESS_KEY: ${MILVUS_MINIO_ACCESS_KEY:?required}
+      MINIO_SECRET_KEY: ${MILVUS_MINIO_SECRET_KEY:?required}
+    ports:
+      - "127.0.0.1:9001:9001"   # 控制台仅本机访问，不对外暴露（§6.16）
+      - "9000"                    # 仅容器网络可达，不映射宿主机
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  milvus:
+    image: milvusdb/milvus:v2.4.17
+    container_name: sports-milvus
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MINIO_ACCESS_KEY_ID: ${MILVUS_MINIO_ACCESS_KEY:?required}
+      MINIO_SECRET_ACCESS_KEY: ${MILVUS_MINIO_SECRET_KEY:?required}
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "19530:19530"   # gRPC：本机调试 / ai-service 容器间 http://milvus:19530
+      - "9091:9091"     # 健康检查 + Prometheus 指标
+    depends_on:
+      milvus-etcd:
+        condition: service_healthy
+      milvus-minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 90s
+    restart: unless-stopped
+
+  # 可选：Milvus 可视化运维台（collection 管理 / 数据洞察），端口 8001
+  attu:
+    image: zilliz/attu:v2.4
+    container_name: sports-attu
+    environment:
+      MILVUS_URL: milvus:19530
+    ports:
+      - "8001:8000"
+    depends_on:
+      milvus:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===== 可观测栈（§5.27）：Prometheus 采集 + Grafana 面板 =====
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: sports-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+      - ai-service
+    restart: unless-stopped
+
+  # ===== 告警通道（§6.32）：Alertmanager 路由 Prometheus 告警 → 钉钉/飞书 webhook =====
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: sports-alertmanager
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: sports-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
 
 volumes:
   mysql_data:
   redis_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+  prometheus_data:
+  grafana_data:

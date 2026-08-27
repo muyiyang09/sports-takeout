@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from uuid import uuid4
 
@@ -21,6 +22,17 @@ logger = logging.getLogger(__name__)
 
 # prompt/response 只留前 1000 字符，够溯源又不撑爆表
 _MAX_TEXT = 1000
+
+# 强引用后台任务集合：防止 fire-and-forget 的 asyncio.Task 因无引用被 GC 回收而丢失审计。
+# add_done_callback 在任务结束后移除引用，避免无限增长。
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def spawn_audit(**kw) -> None:
+    """带强引用的旁路审计：fire-and-forget，但任务被集合持有不会中途被 GC。"""
+    t = asyncio.create_task(log_audit(**kw))
+    _bg_tasks.add(t)
+    t.add_done_callback(_bg_tasks.discard)
 
 
 async def log_audit(
@@ -65,4 +77,4 @@ async def log_audit(
         logger.warning("审计日志写入失败（不影响主流程，生产前需执行 sql/ai_audit_log.sql）：%s", exc)
 
 
-__all__ = ["log_audit"]
+__all__ = ["log_audit", "spawn_audit"]
