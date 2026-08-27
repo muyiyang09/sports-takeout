@@ -184,3 +184,20 @@ A: 检查后端是否在 8080 端口运行，且小程序的 `baseUrl` 配置正
 
 ### Q: 图片上传不成功？
 A: 需要配置阿里云 OSS。在 `.env` 中填写 `SKY_OSS_AK` 和 `SKY_OSS_SK`。
+
+---
+
+## 六、上线前遗留事项（v1.0.0 归档时状态）
+
+> 以下为结项归档时尚未闭环的事项，均已完成代码/脚本交付，待具备环境后验证：
+
+- [ ] **容器全栈冒烟**：本机无 Docker Desktop，`docker-compose up -d --build` 端到端启动、
+      `bash scripts/smoke_test.sh` 冒烟、MySQL initdb 初始化实测未执行。
+      补做方式：安装 Docker → 填 `.env` 必填项（见 §一）→ `docker compose up -d --build` → 冒烟全绿即闭环
+- [ ] **真实微信支付/退款**：当前为模拟支付。接通需商户号资质，切换点已在
+      `OrderServiceImpl.payment()` 注释标注
+- [ ] **WebSocket 握手鉴权**：来单提醒通道未校验 token，上线前必须补拦截器
+- [ ] **生产 profile 收敛**：确认 prod 下关闭 Knife4j (`springdoc.api-docs.enabled=false`)、
+      Actuator `show-details` 收紧并独立 management 端口
+- [ ] **向量库同步任务**：教练资料/价格变更后需触发 Milvus upsert（当前为手动）
+- [ ] **备份恢复演练**：`backup_mysql.sh` 已交付但未实跑 restore 验证
