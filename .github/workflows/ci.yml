@@ -25,6 +25,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
+      # 说明：E/F/I/UP 类 autofix 可通过 `ruff check --fix` 一键修正；
+      # 若 CI Ruff 失败请先本地运行该命令再提交。
       - name: Ruff check
         run: uv run ruff check .
 

@@ -27,16 +27,16 @@ from app.clients.circuit_breaker import llm_breaker
 from app.clients.hybrid import hybrid_match_scores
 from app.clients.llm import achat, achat_structured, is_mock_mode
 from app.clients.trace import trace_node
-from app.graphs.base import END, START, ConditionalRouter, StateGraph
-from app.prompts.loader import load_prompt
-from app.tools.coach_tools import fetch_coaches, fetch_courses, fetch_slots
 from app.core.checkpoint import build_checkpointer
 from app.core.safety import wrap_user_input
+from app.graphs.base import END, START, ConditionalRouter, StateGraph
+from app.prompts.loader import load_prompt
 from app.schemas.coach_recommend import (
     CoachCandidate,
     IntentExtraction,
     RecommendResult,
 )
+from app.tools.coach_tools import fetch_coaches, fetch_courses, fetch_slots
 
 logger = logging.getLogger(__name__)
 
